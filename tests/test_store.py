@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from bot.store import Store, StoreError, Submission, TableExists, TournamentRunning
+from bot.store import (
+    InvalidName,
+    Store,
+    StoreError,
+    Submission,
+    TableExists,
+    TournamentRunning,
+)
 
 GUILD = 1000
 OTHER_GUILD = 2000
@@ -529,3 +536,41 @@ def test_migration_adds_a_column_to_an_existing_database(tmp_path):
         assert reopened.submission_count(GUILD, 1) == 1
     finally:
         reopened.close()
+
+
+# ------------------------------------------------------------- name validation
+
+@pytest.mark.parametrize("bad", ["", "   ", "\n\t ", "A" * 65])
+def test_unrenderable_table_names_are_refused(store, bad):
+    """Discord rejects an empty embed field name and anything over 256 chars,
+    and it does so at /hs time — long after the typo, and on the very
+    autocomplete you would use to remove the table."""
+    with pytest.raises(InvalidName):
+        store.add_table(GUILD, bad)
+    assert store.list_tables(GUILD, include_inactive=True) == []
+
+
+def test_names_keep_their_shape_but_lose_stray_whitespace(store):
+    table = store.add_table(GUILD, "  Attack   From\nMars  ")
+    assert table.name == "Attack From Mars", "a newline would break line-per-entry rendering"
+
+
+def test_a_name_at_the_limit_is_allowed(store):
+    table = store.add_table(GUILD, "A" * 64)
+    assert len(table.name) == 64
+
+
+def test_rename_is_validated_too(fx):
+    with pytest.raises(InvalidName):
+        fx.store.rename_table(GUILD, fx.table.id, "   ")
+    assert fx.store.get_table(GUILD, fx.table.id).name == "Godzilla", "unchanged"
+
+
+def test_tournament_names_are_validated(store):
+    """They land in embed titles and in the reset commands' confirmation modals."""
+    with pytest.raises(InvalidName):
+        store.start_tournament(GUILD, name="B" * 65, started_by=ADMIN, ends_at=None)
+    assert store.latest_tournament(GUILD) is None
+
+    unnamed = store.start_tournament(GUILD, name=None, started_by=ADMIN, ends_at=None)
+    assert unnamed.name is None, "an absent name is still fine"

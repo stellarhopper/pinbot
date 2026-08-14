@@ -24,6 +24,7 @@ here would add a dependency and a failure mode for no measurable gain.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Iterable
@@ -135,6 +136,41 @@ class TableExists(StoreError):
 
 class TournamentRunning(StoreError):
     """A tournament is already running in this guild."""
+
+
+class InvalidName(StoreError):
+    """A table or tournament name that Discord would refuse to render."""
+
+
+# Discord caps embed field names at 256 characters, embed titles at 256, and
+# autocomplete choice labels at 100 — and rejects an *empty* field name
+# outright. A name that violates any of those doesn't fail at the point it is
+# typed; it fails later, with a 400, on every /hs and on the very autocomplete
+# you would use to remove it. 64 is far more than any real machine needs
+# ("Teenage Mutant Ninja Turtles" is 28) and leaves room for the decoration the
+# embeds add around it.
+MAX_NAME_LENGTH = 64
+
+_WHITESPACE = re.compile(r"\s+")
+
+
+def clean_name(raw: str, *, what: str = "name") -> str:
+    """Normalise and validate a user-supplied name, or raise InvalidName.
+
+    Collapses internal whitespace too, so a newline in a name can't break the
+    line-per-entry rendering used by /hs and the tournament announcements.
+    """
+    collapsed = _WHITESPACE.sub(" ", raw).strip()
+    if not collapsed:
+        raise InvalidName(
+            f"That {what} is blank — give me something to call it."
+        )
+    if len(collapsed) > MAX_NAME_LENGTH:
+        raise InvalidName(
+            f"That {what} is {len(collapsed)} characters. "
+            f"Keep it to {MAX_NAME_LENGTH} or fewer."
+        )
+    return collapsed
 
 
 def now() -> int:
@@ -411,7 +447,7 @@ class Store:
     # ------------------------------------------------------------------ tables
 
     def add_table(self, guild_id: int, name: str) -> Table:
-        name = name.strip()
+        name = clean_name(name, what="table name")
         timestamp = now()
         try:
             with self._conn:
@@ -460,7 +496,7 @@ class Store:
         return _table(row) if row else None
 
     def rename_table(self, guild_id: int, table_id: int, new_name: str) -> Table:
-        new_name = new_name.strip()
+        new_name = clean_name(new_name, what="table name")
         clash = self.get_table_by_name(guild_id, new_name)
         if clash and clash.id != table_id:
             raise TableExists(f"There's already a table called **{new_name}**.")
@@ -501,6 +537,10 @@ class Store:
         ends_at: int | None,
         at: int | None = None,
     ) -> Tournament:
+        if name is not None:
+            # Same failure as an unrenderable table name: it lands in embed
+            # titles and in the confirmation modals for the reset commands.
+            name = clean_name(name, what="tournament name")
         if self.active_tournament(guild_id) is not None:
             raise TournamentRunning("A tournament is already running here.")
         with self._conn:

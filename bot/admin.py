@@ -12,9 +12,9 @@ from discord.ext import commands, tasks
 
 from . import embeds, proofs
 from .durations import DurationFormatError, format_duration, parse_duration
-from .perms import require_admin, require_manage_guild
+from .perms import is_admin, require_admin, require_manage_guild
 from .scoring import format_score
-from .store import Store, StoreError, Submission, Table, Tournament, now
+from .store import InvalidName, Store, StoreError, Submission, Table, Tournament, now
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +134,13 @@ class AdminCog(commands.Cog):
             )
             return
         try:
-            await target.send(content=content, embed=embed)
+            await target.send(
+                content=content,
+                embed=embed,
+                # Announcements carry admin-supplied text (the tournament
+                # name), and nothing the bot posts ever needs to ping.
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except discord.HTTPException:
             log.exception("failed to announce in guild %s", guild_id)
 
@@ -195,6 +201,11 @@ class AdminCog(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         if interaction.guild_id is None:
             return []
+        if not is_admin(self.store, interaction):
+            # An autocomplete can only answer with choices, never a message, so
+            # a non-admin gets an empty list rather than an explanation. These
+            # three feed admin-only commands; /new has its own in scores.py.
+            return []
         needle = current.strip().lower()
         return [
             app_commands.Choice(name=table.name, value=table.name)
@@ -220,6 +231,11 @@ class AdminCog(commands.Cog):
         """Live scores, highest first — the standing king is what you usually void."""
         if interaction.guild_id is None:
             return []
+        if not is_admin(self.store, interaction):
+            # An autocomplete can only answer with choices, never a message, so
+            # a non-admin gets an empty list rather than an explanation. These
+            # three feed admin-only commands; /new has its own in scores.py.
+            return []
         tournament = self.store.latest_tournament(interaction.guild_id)
         if tournament is None:
             return []
@@ -232,6 +248,11 @@ class AdminCog(commands.Cog):
     ) -> list[app_commands.Choice[int]]:
         """Voided scores, most recently voided first — usually the drop you regret."""
         if interaction.guild_id is None:
+            return []
+        if not is_admin(self.store, interaction):
+            # An autocomplete can only answer with choices, never a message, so
+            # a non-admin gets an empty list rather than an explanation. These
+            # three feed admin-only commands; /new has its own in scores.py.
             return []
         tournament = self.store.latest_tournament(interaction.guild_id)
         if tournament is None:
@@ -891,6 +912,9 @@ class AdminCog(commands.Cog):
             tournament = self.store.start_tournament(
                 guild_id, name=name, started_by=interaction.user.id, ends_at=ends_at
             )
+        except InvalidName as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
         except StoreError as exc:
             await interaction.response.send_message(
                 f"{exc} Use `/tournament status` to see it, or `/tournament end` "

@@ -52,11 +52,16 @@ class FakeAttachment:
 class FakeMessage:
     _next_id = 7000
 
-    def __init__(self, channel: FakeChannel, content, embed, embeds, file) -> None:
+    def __init__(
+        self, channel: FakeChannel, content, embed, embeds, file, allowed_mentions=None
+    ) -> None:
         FakeMessage._next_id += 1
         self.id = FakeMessage._next_id
         self.channel = channel
         self.content = content
+        # Recorded so tests can assert the bot never pings: user-supplied text
+        # (tournament names, notes, nicknames) reaches these messages.
+        self.allowed_mentions = allowed_mentions
         self.embeds = [embed] if embed else list(embeds or [])
         self.attachments = []
         if file is not None:
@@ -104,7 +109,7 @@ class FakeChannel(discord.abc.Messageable):
     async def send(
         self, content=None, *, embed=None, embeds=None, file=None, allowed_mentions=None
     ) -> FakeMessage:
-        message = FakeMessage(self, content, embed, embeds, file)
+        message = FakeMessage(self, content, embed, embeds, file, allowed_mentions)
         self.sent.append(message)
         return message
 
@@ -278,6 +283,9 @@ class Harness:
             return True
 
         monkeypatch.setattr(admin_module, "require_admin", allow)
+        # Autocomplete can't reply, so it calls the synchronous is_admin. Same
+        # deal: authorization itself is unit-tested in test_perms.py.
+        monkeypatch.setattr(admin_module, "is_admin", lambda _store, _itx: True)
 
         # /config reset has a stricter gate — Manage Server only, because it
         # clears the admin-role list. Flip it with harness.set_manage_guild().

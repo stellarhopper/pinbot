@@ -446,6 +446,20 @@ def tournament_started_embed(tournament: Tournament, table_names: list[str]) -> 
     return embed
 
 
+def field_name(name: str) -> str:
+    """A table name that Discord will accept as an embed field name.
+
+    Names are validated on the way *in* (store.clean_name), so this only ever
+    matters for rows written before that existed — but the failure it prevents
+    is the worst kind: an empty or over-long field name 400s the whole embed,
+    so one bad table takes down the final results for every table.
+    """
+    cleaned = name.strip()
+    if not cleaned:
+        return "(unnamed table)"
+    return cleaned if len(cleaned) <= 256 else cleaned[:253] + "..."
+
+
 def final_results_embed(
     tournament: Tournament, results: list[tuple[Table, Submission | None]]
 ) -> discord.Embed:
@@ -459,7 +473,7 @@ def final_results_embed(
     )
     for table, king in results:
         if king is None:
-            embed.add_field(name=table.name, value="no scores set", inline=False)
+            embed.add_field(name=field_name(table.name), value="no scores set", inline=False)
             continue
         value = (
             f"{CROWN} <@{king.user_id}> — **{format_score(king.score)}**\n"
@@ -467,7 +481,7 @@ def final_results_embed(
         )
         if link := _proof_link(king):
             value += f" · {link}"
-        embed.add_field(name=table.name, value=value, inline=False)
+        embed.add_field(name=field_name(table.name), value=value, inline=False)
     if not results:
         embed.add_field(name="Tables", value="none were configured", inline=False)
     embed.timestamp = discord.utils.utcnow()

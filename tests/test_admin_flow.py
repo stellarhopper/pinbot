@@ -955,3 +955,68 @@ async def test_every_consequential_action_is_audited(tmp_path, monkeypatch):
     ):
         assert expected in actions, f"{expected} left no audit trail: {actions}"
     h.close()
+
+
+# --------------------------------------------------------- hardening (audit)
+
+async def test_a_blank_table_name_is_refused_with_an_explanation(tmp_path, monkeypatch):
+    """The bad case isn't the typo, it's the recovery: an empty name 400s /hs
+    *and* the /table autocomplete you would use to remove it."""
+    h = await Harness.create(tmp_path, monkeypatch, tables=())
+    itx = await h.run(h.admin.table_add, FakeInteraction(), name="   ")
+
+    assert "blank" in itx.reply
+    assert h.store.list_tables(GUILD, include_inactive=True) == []
+    h.close()
+
+
+async def test_an_overlong_table_name_is_refused(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch, tables=())
+    itx = await h.run(h.admin.table_add, FakeInteraction(), name="G" * 200)
+
+    assert "200 characters" in itx.reply
+    assert h.store.list_tables(GUILD, include_inactive=True) == []
+    h.close()
+
+
+async def test_an_overlong_tournament_name_is_refused_without_a_confusing_hint(
+    tmp_path, monkeypatch
+):
+    """It must not be reported as 'a tournament is already running'."""
+    h = await Harness.create(tmp_path, monkeypatch, tournament=False)
+    itx = await h.run(h.admin.tournament_start, FakeInteraction(), name="T" * 100)
+
+    assert "100 characters" in itx.reply
+    assert "/tournament status" not in itx.reply
+    assert h.store.latest_tournament(GUILD) is None
+    h.close()
+
+
+async def test_announcements_never_ping(tmp_path, monkeypatch):
+    """Announcement text carries an admin-supplied tournament name, and a
+    mentionable role in it would ping the server on every announcement."""
+    h = await Harness.create(tmp_path, monkeypatch, ends_at=now() + 3600)
+    await h.run(h.admin.tournament_extend, FakeInteraction(), duration="1h")
+
+    posted = h.channel.last
+    assert posted.content is not None, "this one is a content message, not an embed"
+    assert posted.allowed_mentions is not None, "nothing the bot posts needs to ping"
+    assert posted.allowed_mentions.everyone is False
+    assert posted.allowed_mentions.roles is False
+    h.close()
+
+
+async def test_autocomplete_tells_a_non_admin_nothing(tmp_path, monkeypatch):
+    """The ledger is admin-only to read via /history; its autocompletes were
+    handing the same rows to anyone who typed /drop."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "1,000,000")
+    itx = FakeInteraction()
+
+    assert await h.admin.drop_autocomplete(itx, "") != [], "an admin still sees them"
+
+    monkeypatch.setattr(admin_module, "is_admin", lambda _store, _itx: False)
+    assert await h.admin.drop_autocomplete(itx, "") == []
+    assert await h.admin.restore_autocomplete(itx, "") == []
+    assert await h.admin.table_autocomplete(itx, "") == []
+    h.close()
