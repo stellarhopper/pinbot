@@ -299,7 +299,7 @@ class Harness:
             store.add_table(GUILD, name)
         if tournament:
             store.start_tournament(
-                GUILD, name="Lanfest", started_by=99, ends_at=ends_at
+                GUILD, name="Spring Open", started_by=99, ends_at=ends_at
             )
         harness = cls(store, bot, scores, admin, chan)
         harness._gate = gate

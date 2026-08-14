@@ -863,7 +863,7 @@ class AdminCog(commands.Cog):
 
     @tournament_group.command(name="start", description="Open the submission window.")
     @app_commands.describe(
-        name="Optional name, e.g. Lanfest Spring 2026",
+        name="Optional name, e.g. Spring Open 2026",
         ends_in="Optional scheduled end, e.g. 36h, 2d, 2d 4h 30m",
     )
     async def tournament_start(

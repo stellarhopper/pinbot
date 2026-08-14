@@ -1,4 +1,4 @@
-# Lanfest Pinball Bot
+# Discord Pinball Bot
 
 A Discord bot that runs a king-of-the-hill pinball tournament. Players walk up to any
 open machine, play, and post their score with `/new` — a photo of the score screen is
@@ -96,7 +96,7 @@ read-only calls and never prints the token.
 ### 2. Install
 
 ```sh
-git clone <this repo> && cd lanfest-discord-pinball
+git clone git@github.com:stellarhopper/pinbot.git && cd pinbot
 python3 -m venv .venv
 .venv/bin/pip install -e .
 cp .env.example .env      # then put your token in it
@@ -127,7 +127,7 @@ Go to the channel you want the tournament to live in, and:
 /table add Attack From Mars
 /table add Medieval Madness
 /table add Twilight Zone
-/tournament start name:Lanfest 2026 ends_in:2d
+/tournament start name:Spring Open 2026 ends_in:2d
 /config admin-role add @Staff        (optional)
 ```
 
@@ -166,16 +166,16 @@ bytes are released as soon as they are uploaded.
 
 ```ini
 [Unit]
-Description=Lanfest pinball tournament bot
+Description=Discord pinball tournament bot
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/lanfest-discord-pinball
+WorkingDirectory=/home/pi/pinbot
 Environment=DISCORD_TOKEN=your-token-here
-ExecStart=/home/pi/lanfest-discord-pinball/.venv/bin/python -m bot
+ExecStart=/home/pi/pinbot/.venv/bin/python -m bot
 Restart=always
 RestartSec=10
 

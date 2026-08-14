@@ -62,7 +62,7 @@ def tournament(*, open_: bool = True, ends_at: int | None = None) -> Tournament:
     return Tournament(
         id=1,
         guild_id=500,
-        name="Lanfest 2026",
+        name="Spring Open 2026",
         started_at=now() - 3600,
         started_by=99,
         ends_at=ends_at,
@@ -255,7 +255,7 @@ def test_the_compact_line_copes_with_an_empty_table():
 
 def test_the_listing_header_summarises_the_tournament():
     header = embeds.standings_header(tournament(ends_at=now() + 7200), 12, 5, 4)
-    assert "Lanfest 2026" in header
+    assert "Spring Open 2026" in header
     assert "current standings" in header
     assert "4 table(s)" in header and "12 score(s)" in header and "5 player(s)" in header
     assert "ends <t:" in header

@@ -36,7 +36,7 @@ async def _deny(_store, interaction) -> bool:
 
 async def test_start_announces_and_warns_about_missing_setup(tmp_path, monkeypatch):
     h = await Harness.create(tmp_path, monkeypatch, tables=(), tournament=False, set_channel=False)
-    itx = await h.run(h.admin.tournament_start, FakeInteraction(), name="Lanfest", ends_in="2d")
+    itx = await h.run(h.admin.tournament_start, FakeInteraction(), name="Spring Open", ends_in="2d")
 
     assert "is open" in itx.reply
     assert "No tables are set up" in itx.reply
@@ -46,10 +46,10 @@ async def test_start_announces_and_warns_about_missing_setup(tmp_path, monkeypat
 
 async def test_start_posts_the_opening_announcement(tmp_path, monkeypatch):
     h = await Harness.create(tmp_path, monkeypatch, tournament=False)
-    await h.run(h.admin.tournament_start, FakeInteraction(), name="Lanfest 2026", ends_in="36h")
+    await h.run(h.admin.tournament_start, FakeInteraction(), name="Spring Open 2026", ends_in="36h")
 
     embed = h.channel.last.embeds[0]
-    assert "Lanfest 2026 is open" in embed.title
+    assert "Spring Open 2026 is open" in embed.title
     tables = next(f for f in embed.fields if f.name.startswith("Tables"))
     assert "Godzilla" in tables.value and "Attack From Mars" in tables.value
     assert h.store.active_tournament(GUILD) is not None
@@ -454,7 +454,7 @@ async def test_reset_discards_the_tournament_without_announcing_results(tmp_path
     assert h.store.get_channel_id(GUILD) == h.channel.id
 
     # And a fresh tournament can now start, which it could not before.
-    started = await h.run(h.admin.tournament_start, FakeInteraction(), name="Lanfest")
+    started = await h.run(h.admin.tournament_start, FakeInteraction(), name="Spring Open")
     assert "is open" in started.reply
     assert h.store.active_tournament(GUILD) is not None
     h.close()
@@ -738,13 +738,13 @@ async def test_starting_a_tournament_adopts_and_so_stops_warning(tmp_path, monke
         tmp_path, monkeypatch, tournament=False, set_channel=False
     )
     itx = await h.run(
-        h.admin.tournament_start, FakeInteraction(channel=h.channel), name="Lanfest"
+        h.admin.tournament_start, FakeInteraction(channel=h.channel), name="Spring Open"
     )
 
     assert "No pinball channel is set" not in itx.reply
     assert h.store.get_channel_id(GUILD) == h.channel.id
     # And the opening announcement lands there rather than falling back.
-    assert any("Lanfest is open" in (e.title or "") for e in h.channel.last.embeds)
+    assert any("Spring Open is open" in (e.title or "") for e in h.channel.last.embeds)
     h.close()
 
 
@@ -759,7 +759,7 @@ async def test_a_channel_the_bot_cannot_post_in_is_not_adopted(tmp_path, monkeyp
         channel=BrokenChannel(),
     )
     itx = await h.run(
-        h.admin.tournament_start, FakeInteraction(channel=h.channel), name="Lanfest"
+        h.admin.tournament_start, FakeInteraction(channel=h.channel), name="Spring Open"
     )
 
     assert h.store.get_channel_id(GUILD) is None, "a half-set channel is worse than none"
@@ -868,7 +868,7 @@ async def test_reset_all_names_the_tournament_it_is_about_to_discard(tmp_path, m
     """Wiping mid-event loses the prize announcement, so say so twice."""
     h = await Harness.create(tmp_path, monkeypatch)
     itx = await h.run(h.admin.reset_all, FakeInteraction())
-    assert "Lanfest" in itx.response.modal.title
+    assert "Spring Open" in itx.response.modal.title
 
     done = FakeInteraction()
     itx.response.modal.field._value = itx.response.modal.phrase
@@ -936,7 +936,7 @@ async def test_the_read_only_admin_views_are_gated_too(tmp_path, monkeypatch):
 async def test_every_consequential_action_is_audited(tmp_path, monkeypatch):
     h = await Harness.create(tmp_path, monkeypatch, tables=(), tournament=False)
     await h.run(h.admin.table_add, FakeInteraction(), name="Godzilla")
-    await h.run(h.admin.tournament_start, FakeInteraction(), name="Lanfest")
+    await h.run(h.admin.tournament_start, FakeInteraction(), name="Spring Open")
     await h.submit("Godzilla", "1,000,000")
     sub_id = h.king("Godzilla").id
     await h.run(h.admin.drop, FakeInteraction(), id=sub_id, reason="test")
