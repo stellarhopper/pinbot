@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
+# >=77 for PEP 639 license metadata (the SPDX `license` string below).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lanfest-pinball"
 version = "0.1.0"
 description = "King-of-the-hill pinball tournament bot for Lanfest Colorado"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["discord.py>=2.4"]
 

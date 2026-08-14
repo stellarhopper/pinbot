@@ -303,3 +303,7 @@ score just sets `voided_at`, so "who holds the crown" is always a derived query 
 `highest live score, earliest wins ties`. Reverting after a `/drop` is therefore free and
 correct even when you void a score that was never king, void several in a row, or void
 everything on a table.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
