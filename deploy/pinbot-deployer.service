@@ -1,0 +1,30 @@
+[Unit]
+Description=Discord Pinball Bot - MQTT deployment listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stellarhopper
+WorkingDirectory=/home/stellarhopper/pinbot/deploy
+ExecStart=/usr/bin/python3 /home/stellarhopper/pinbot/deploy/mqtt_subscriber.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/pinbot/deployer.log
+StandardError=append:/var/log/pinbot/deployer.log
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+# Broker host, username, password and topic all live in .env.mqtt (chmod 600,
+# never committed) rather than being baked into this unit — the unit is in git
+# and a broker URL plus username is most of a credential.
+EnvironmentFile=/home/stellarhopper/pinbot/deploy/.env.mqtt
+
+# Security
+# NoNewPrivileges is deliberately NOT set: deployment shells out to
+# `sudo systemctl restart pinbot`, which the sudoers drop-in allows without a
+# password. That single command is the whole of this service's privilege.
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

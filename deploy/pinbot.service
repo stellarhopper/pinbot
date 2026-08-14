@@ -1,0 +1,32 @@
+[Unit]
+Description=Discord Pinball Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stellarhopper
+WorkingDirectory=/home/stellarhopper/pinbot
+ExecStart=/home/stellarhopper/pinbot/.venv/bin/python -m bot
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/pinbot/output.log
+StandardError=append:/var/log/pinbot/error.log
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+# The tournament database lives outside the checkout on purpose: deployment
+# does `git reset --hard`, and a prize-bearing ledger has no business sitting
+# in a directory that deployment rewrites. StateDirectory creates and owns
+# /var/lib/pinbot for us.
+StateDirectory=pinbot
+Environment="DB_PATH=/var/lib/pinbot/pinball.db"
+# Optional: the bot reads .env itself, so a missing file is not an error.
+EnvironmentFile=-/home/stellarhopper/pinbot/.env
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

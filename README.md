@@ -162,34 +162,30 @@ The bot is built for a lean always-on Pi: one process, one SQLite file, no image
 disk, and flat memory use. At most two proof photos are held in memory at a time, and the
 bytes are released as soon as they are uploaded.
 
-`systemd` unit — save as `/etc/systemd/system/pinball-bot.service`:
+It deploys itself. Push to `main` and the Pi pulls, tests, and restarts on its own —
+over an outbound MQTT connection, so nothing has to be reachable from the internet:
 
-```ini
-[Unit]
-Description=Discord pinball tournament bot
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/pinbot
-Environment=DISCORD_TOKEN=your-token-here
-ExecStart=/home/pi/pinbot/.venv/bin/python -m bot
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
 ```
+git push → GitHub Actions → tests → MQTT broker → Pi → tests → restart
+```
+
+One command sets the whole thing up:
 
 ```sh
-sudo systemctl enable --now pinball-bot
-journalctl -u pinball-bot -f
+git clone https://github.com/stellarhopper/pinbot.git ~/pinbot
+bash ~/pinbot/deploy/setup-pi.sh
 ```
 
-Real environment variables take precedence over `.env`, so the unit's `Environment=` line
-wins and you don't need both.
+That installs the packages, builds the venv, prompts for the Discord token and the broker
+credentials, installs two systemd units (`pinbot`, `pinbot-deployer`) with a narrow sudoers
+drop-in, and starts them. The tournament database lands in `/var/lib/pinbot/pinball.db` —
+outside the checkout, because deployment does `git reset --hard` and a prize-bearing ledger
+shouldn't live in a directory that deployment rewrites. A deployment whose tests fail rolls
+the checkout back and leaves the running bot alone.
+
+**[deploy/README.md](deploy/README.md) has the full picture** — the GitHub secrets to set,
+where every file lives, how to back the database up mid-event, and what to check when a
+push doesn't land.
 
 ### Does the database grow forever?
 

@@ -1,0 +1,8 @@
+# Installed to /etc/sudoers.d/pinbot (chmod 440) by setup-pi.sh.
+#
+# The deployment listener needs to restart the bot and nothing else. These
+# three commands are the entire privilege grant — no wildcards, so it cannot
+# be talked into restarting some other unit.
+stellarhopper ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart pinbot
+stellarhopper ALL=(ALL) NOPASSWD: /usr/bin/systemctl status pinbot
+stellarhopper ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active pinbot

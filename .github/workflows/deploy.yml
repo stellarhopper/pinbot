@@ -1,0 +1,37 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  notify-pi:
+    # Gated on the tests: the Pi runs them again before restarting, but there
+    # is no reason to wake it for a commit that already failed here.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the deploy trigger
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mosquitto-clients
+          mosquitto_pub \
+            -h "${{ secrets.MQTT_BROKER }}" \
+            -p 8883 \
+            -t "pinbot/deploy" \
+            -m "${{ github.sha }}" \
+            -u "${{ secrets.MQTT_USERNAME }}" \
+            -P "${{ secrets.MQTT_PASSWORD }}" \
+            --capath /etc/ssl/certs/
+          echo "Told the Pi to deploy ${{ github.sha }}"
