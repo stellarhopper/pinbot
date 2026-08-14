@@ -12,7 +12,6 @@ which the ledger already knows.
 
 from __future__ import annotations
 
-import zlib
 from datetime import timedelta
 
 import discord
@@ -33,17 +32,41 @@ VOID_MARK = "\N{CROSS MARK}"
 BULLET = "\N{BLACK SMALL SQUARE}"
 MEDALS = ("\N{FIRST PLACE MEDAL}", "\N{SECOND PLACE MEDAL}", "\N{THIRD PLACE MEDAL}")
 
-# A stable accent per table, so four embeds in one /hs listing are tellable
-# apart at a glance. crc32 rather than hash(): hash() is salted per process, so
-# a table's colour would change every restart.
+# A stable accent per table, so several embeds in one /hs listing are tellable
+# apart at a glance.
+#
+# Ordered by adjacent contrast, not by hue family: tables are assigned
+# *consecutive* slots, so the first few entries are the ones that will actually
+# appear side by side, and each should look nothing like the one before it.
+# None of them may be mistaken for the state colours above — GOLD is a crown,
+# RED is a void, GREEN is a restore.
 _ACCENTS = (
-    0x5865F2, 0xEB459E, 0x57F287, 0xFEE75C,
-    0xED4245, 0x00A8FC, 0xF47B67, 0xA652FF,
+    0x5865F2,  # blurple
+    0xF47B67,  # coral
+    0x57F287,  # mint
+    0xEB459E,  # fuchsia
+    0xFEE75C,  # yellow
+    0xA652FF,  # violet
+    0x1ABC9C,  # teal
+    0xE67E22,  # orange
+    0x00A8FC,  # azure
+    0xFF6FA5,  # rose
+    0x8DC63F,  # lime
+    0x9B6DFF,  # periwinkle
 )
 
 
-def table_color(name: str) -> discord.Color:
-    return discord.Color(_ACCENTS[zlib.crc32(name.lower().encode()) % len(_ACCENTS)])
+def table_color(table: Table) -> discord.Color:
+    """The accent stripe for one table's embed.
+
+    Keyed on position, not on the name. Hashing the name into the palette
+    collided on the third table added to a real server — with eight slots, three
+    tables collide about a third of the time, which is just the birthday
+    paradox. `sort_order` is unique per guild, never reused, and survives a
+    retire/re-add, so consecutive tables get consecutive accents and no two
+    share a colour until the palette is exhausted.
+    """
+    return discord.Color(_ACCENTS[(table.sort_order - 1) % len(_ACCENTS)])
 
 
 def ts(epoch: int | None, style: str = "f") -> str:
@@ -178,7 +201,7 @@ def table_summary_embed(
     embed = discord.Embed(
         title=table.name,
         description="\n".join(lines),
-        color=table_color(table.name),
+        color=table_color(table),
     )
     _crown_author(embed, king, f"{king.user_display} — king of the hill", avatar_url)
     if fresh_url:
@@ -220,7 +243,7 @@ def table_detail_embed(
     embed = discord.Embed(
         title=table.name,
         description="\n".join(lines),
-        color=table_color(table.name),
+        color=table_color(table),
     )
     _crown_author(embed, king, f"{king.user_display} — king of the hill", avatar_url)
 

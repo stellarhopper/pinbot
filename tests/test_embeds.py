@@ -50,8 +50,10 @@ def sub(
     )
 
 
-def table(name: str = "Godzilla") -> Table:
-    return Table(id=1, guild_id=500, name=name, active=True, sort_order=1, created_at=0)
+def table(name: str = "Godzilla", sort_order: int = 1) -> Table:
+    return Table(
+        id=1, guild_id=500, name=name, active=True, sort_order=sort_order, created_at=0
+    )
 
 
 def stats(attempts: int = 3, players: int = 2, challenges: int = 0) -> TableStats:
@@ -73,20 +75,42 @@ def tournament(*, open_: bool = True, ends_at: int | None = None) -> Tournament:
 
 # ------------------------------------------------------------- table accents
 
-def test_each_table_gets_a_stable_accent_colour():
-    assert embeds.table_color("Godzilla") == embeds.table_color("godzilla")
-    assert embeds.table_color("Godzilla").value in embeds._ACCENTS
+def test_no_two_tables_share_an_accent_until_the_palette_runs_out():
+    """The property the old name-hashing version could not hold.
+
+    It picked a slot with crc32(name) % 8, so three tables collided about a
+    third of the time — and a real server hit it on its third table. Position
+    can't collide: sort_order is unique per guild and never reused.
+    """
+    colours = [embeds.table_color(table(sort_order=n)).value for n in range(1, 13)]
+    assert len(set(colours)) == len(embeds._ACCENTS) == 12
 
 
-def test_accent_colours_survive_a_restart():
-    """crc32, not hash(): hash() is salted per process, so a table's colour
-    would change on every restart of the bot."""
-    assert embeds.table_color("Godzilla").value == 0x00A8FC
+def test_the_accent_depends_only_on_position():
+    """Renaming a table must not repaint it, and the colour must survive a
+    restart — nothing here may be derived from a per-process hash."""
+    assert embeds.table_color(table("Godzilla", 3)) == embeds.table_color(
+        table("Renamed Mid-Event", 3)
+    )
+    assert embeds.table_color(table(sort_order=1)).value == embeds._ACCENTS[0]
 
 
-def test_the_real_tables_are_visually_distinguishable():
-    names = ("Stranger Things", "King Kong", "Godzilla", "Attack From Mars")
-    assert len({embeds.table_color(n).value for n in names}) == len(names)
+def test_the_collision_that_prompted_this():
+    """Regression: these three names at these positions are the real server's
+    tables. 'King Kong' and 'Dungeons & Dragons' both hashed to slot 4."""
+    tables = [
+        table("Stranger Things", 1),
+        table("King Kong", 2),
+        table("Dungeons & Dragons", 3),
+    ]
+    assert len({embeds.table_color(t).value for t in tables}) == 3
+
+
+def test_the_palette_wraps_once_it_is_exhausted():
+    """The accepted limit: a thirteenth table reuses the first colour."""
+    assert embeds.table_color(table(sort_order=13)) == embeds.table_color(
+        table(sort_order=1)
+    )
 
 
 # ---------------------------------------------------------- summary standings
