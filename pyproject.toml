@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lanfest-pinball"
+version = "0.1.0"
+description = "King-of-the-hill pinball tournament bot for Lanfest Colorado"
+requires-python = ">=3.11"
+dependencies = ["discord.py>=2.4"]
+
+[project.optional-dependencies]
+# Phase 2 only: the photo/score cross-check. Absent this, the feature is
+# simply unavailable and everything else works unchanged.
+vision = ["anthropic>=0.40"]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # discord.py 2.7 on Python 3.14. Upstream's to fix, and it fires on every
+    # command registration, which drowns out warnings that are ours.
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
+]
+
+[tool.setuptools]
+packages = ["bot"]
