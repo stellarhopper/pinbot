@@ -111,6 +111,13 @@ cp .env.example .env      # then put your token in it
 Set `DEV_GUILD_ID` in `.env` while you're testing: commands then sync to that one server
 instantly instead of taking up to an hour to appear globally. Unset it for production.
 
+The two scopes are exclusive, and the bot enforces that. Discord *merges* a guild's commands
+with the global set, so a tree published to both shows every command twice — setting
+`DEV_GUILD_ID` therefore retracts the global set, and unsetting it retracts the guild copy
+(the guild is remembered in the database, because by then the variable is gone). Flipping
+between dev and production is that one line plus a restart, in either direction. While it is
+set, the bot has no commands in any other server it's in.
+
 To get a server's ID: Discord **Settings → Advanced → Developer Mode** on, then right-click
 the server icon → **Copy Server ID**.
 

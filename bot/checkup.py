@@ -32,6 +32,14 @@ OK = "\N{WHITE HEAVY CHECK MARK}"
 BAD = "\N{CROSS MARK}"
 WARN = "\N{WARNING SIGN}"
 
+# A headless Pi reached over SSH hands us whatever locale the client sent,
+# which is often latin-1 — and this tool died with a UnicodeEncodeError on its
+# very first tick mark. A diagnostic that only runs on a UTF-8 terminal is
+# useless exactly where it is needed most.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def invite_url(app_id: int) -> str:
     return (

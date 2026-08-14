@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,6 +120,9 @@ CHANNEL_KEY = "pinball_channel_id"
 ADMIN_ROLES_KEY = "admin_role_ids"
 VISION_KEY = "vision_enabled"
 VISION_PING_KEY = "vision_ping_role_id"
+
+# `meta` key, not a guild setting — see Store.dev_synced_guilds.
+DEV_SYNC_KEY = "dev_synced_guilds"
 
 
 class StoreError(Exception):
@@ -297,6 +301,45 @@ class Store:
 
     def close(self) -> None:
         self._conn.close()
+
+    # -------------------------------------------------------- internal state
+    #
+    # `meta` is the bot's own bookkeeping, deliberately separate from
+    # `settings`: nothing here is a guild's configuration, so none of it should
+    # show up in /config show, be counted by /config reset, or be cleared by it.
+
+    def get_meta(self, key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+
+    def dev_synced_guilds(self) -> list[int]:
+        """Guilds that currently hold a guild-scoped copy of the command tree.
+
+        Remembered across restarts because leaving dev mode has to undo it, and
+        by then DEV_GUILD_ID is gone from the environment — without this, the
+        guild copies linger next to the global ones and every command appears
+        twice.
+        """
+        raw = self.get_meta(DEV_SYNC_KEY)
+        if not raw:
+            return []
+        try:
+            return [int(x) for x in json.loads(raw)]
+        except (ValueError, TypeError):
+            return []
+
+    def set_dev_synced_guilds(self, guild_ids: Iterable[int]) -> None:
+        self.set_meta(DEV_SYNC_KEY, json.dumps(sorted(set(guild_ids))))
 
     # ---------------------------------------------------------------- settings
 
