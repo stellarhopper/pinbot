@@ -268,12 +268,21 @@ silent pass. The bot also reports which machine it thinks is in the photo, but n
 on that alone — backglass art is often out of frame.
 
 **How a flag is reviewed.** The bot replies to the proof photo, publicly, mentioning the
-player and the admin roles, and puts ✅ and ❌ on the photo. An admin reacting ✅ lets the
-score stand; ❌ voids it through the ordinary drop path, so the crown reverts and the usual
-announcement fires. Every decision is audited. `/flagged` lists anything still waiting.
+player and the admin roles, and puts ✅ and ❌ on the photo. Reacting ✅ lets the score stand;
+❌ voids it through the ordinary drop path, so the crown reverts and the usual announcement
+fires. Every decision is audited. `/flagged` lists anything still waiting, and the verdict
+appears under the photo itself — including when the check couldn't run, so a broken check
+never looks like a working one.
 
-Only a score the check actually flagged can be dropped this way, and only by an admin — a
-stray ❌ on an ordinary proof post does nothing.
+**The player can withdraw their own flagged score.** Most flags are the player's own typo,
+and letting them take it back with one ❌ keeps it off the admins' desk entirely. The grant
+is deliberately asymmetric: owning a score is enough to withdraw it, never enough to approve
+it, or a mismatch would be settled by the one person with a reason to want it kept. It's
+recorded as a withdrawal rather than a ruling.
+
+Only a score the check actually flagged is reactable at all — a stray ❌ on an ordinary proof
+post does nothing, and a player cannot reach anyone else's score or an unflagged one of their
+own. `/drop` remains the admin path for everything else.
 
 Expect a fair number of flags, and keep that in mind when reading them: every submission is
 checked and glare on a DMD is common, so a flag means "worth a look", not "cheat".
@@ -296,7 +305,7 @@ silently.
 .venv/bin/python -m pytest
 ```
 
-353 tests, no Discord connection needed, under a second. Two tiers:
+367 tests, no Discord connection needed, under a second. Two tiers:
 
 **Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
 `test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,
@@ -316,8 +325,9 @@ drives `/new` end to end.
 than taking on pytest-asyncio as a dependency.
 
 Both tiers are mutation-checked: reintroducing the decimal-stripping bug fails 9 tests,
-making `/new` always announce a new king fails 2, and removing either the admin check or the
-bot's-own-reaction guard from the photo review fails 1 each.
+making `/new` always announce a new king fails 2, and in the photo review, removing the
+admin check, the bot's-own-reaction guard, or the rule that a player may withdraw but not
+approve their own score each fails a test.
 
 ### Layout
 

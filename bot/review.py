@@ -63,11 +63,19 @@ def flag_text(
             f"than **{table_name}**."
         )
 
+    # Offer the player the self-serve route first. Most flags are their own
+    # typo, and a player who can withdraw it in one tap never becomes an admin's
+    # problem — but say plainly that keeping it is not theirs to decide, so the
+    # missing ✅ doesn't read as a bug.
+    lines.append(
+        f"{DROP} React on the photo above to withdraw it yourself — no need to "
+        "wait for anyone."
+    )
     who = " ".join(f"<@&{role_id}>" for role_id in admin_role_ids)
-    call = f"{APPROVE} keeps the score, {DROP} drops it — react on the photo above."
+    call = f"{APPROVE} keeps the score, {DROP} drops it."
     # With no admin role configured, admins are Manage Server holders, who are
     # not a pingable role. The flag still stands and still shows in /flagged.
-    lines.append(f"{who} {call}" if who else call)
+    lines.append(f"{who} — {call}" if who else f"An admin decides otherwise: {call}")
     return "\n".join(lines)
 
 
@@ -233,11 +241,22 @@ class ReviewCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
-        """Resolve a pending flag when an admin reacts on the proof post.
+        """Resolve a pending flag when someone entitled to reacts on the proof post.
 
         Every reaction in every channel the bot can see arrives here, so the
         order of the guards matters: the cheap local ones come first and only a
         genuine review reaches the ledger.
+
+        Two different grants, deliberately asymmetric:
+
+        * an **admin** may do either — keep the score or drop it;
+        * the **player who submitted it** may only *withdraw* it. Owning a score
+          is enough to take it back, never enough to certify it, or a mismatch
+          would be resolved by the one person with a reason to want it kept.
+
+        A player still cannot touch a score that was never flagged, because the
+        pending gate above applies to everyone. This is "withdraw the thing the
+        check queried", not "delete your own scores at will".
         """
         if self.bot.user is not None and payload.user_id == self.bot.user.id:
             return  # our own ✅/❌, added when the flag was posted
@@ -258,19 +277,27 @@ class ReviewCog(commands.Cog):
             # has decided, is reviewable this way.
             return
 
+        # No member means nobody to authorize as an admin, so fail closed on
+        # that grant — exactly as perms.is_admin does. Ownership needs no
+        # member object, only the user ID the gateway already gave us.
         member = payload.member
-        if member is None:
-            return  # fail closed, exactly as perms.is_admin does
-        if not has_admin_access(
+        is_admin = member is not None and has_admin_access(
             manage_guild=member.guild_permissions.manage_guild,
             member_role_ids=[role.id for role in member.roles],
             admin_role_ids=self.store.get_admin_role_ids(payload.guild_id),
-        ):
+        )
+        is_owner = payload.user_id == submission.user_id
+
+        if emoji == APPROVE and not is_admin:
+            # Including the player whose score it is: they may take it back,
+            # never wave it through.
+            return
+        if emoji == DROP and not (is_admin or is_owner):
             # Ignored in silence. Removing the reaction would need Manage
             # Messages, which the bot does not have and should not need.
             return
 
-        # The claim is what settles a race between two admins reacting at once:
+        # The claim is what settles a race between two people reacting at once:
         # exactly one gets a row back, and only that one acts.
         reviewed = self.store.review_submission(
             payload.guild_id, submission.id, by=payload.user_id
@@ -281,7 +308,7 @@ class ReviewCog(commands.Cog):
         if emoji == APPROVE:
             await self._approve(payload, reviewed)
         else:
-            await self._drop(payload, reviewed)
+            await self._drop(payload, reviewed, withdrawn=is_owner)
 
     async def _approve(
         self, payload: discord.RawReactionActionEvent, submission: Submission
@@ -301,25 +328,33 @@ class ReviewCog(commands.Cog):
         )
 
     async def _drop(
-        self, payload: discord.RawReactionActionEvent, submission: Submission
+        self,
+        payload: discord.RawReactionActionEvent,
+        submission: Submission,
+        *,
+        withdrawn: bool = False,
     ) -> None:
         assert payload.guild_id is not None
         guild_id = payload.guild_id
+        # A player taking their own score back and an admin ruling against it
+        # are different events, and /history and /audit should not have to guess
+        # which happened.
+        reason = "withdrawn by the player" if withdrawn else "photo review"
         voided = self.store.void_submission(
-            guild_id, submission.id, voided_by=payload.user_id, reason="photo review"
+            guild_id, submission.id, voided_by=payload.user_id, reason=reason
         )
         if voided is None:
             return
         self.store.log(
             guild_id,
             actor_id=payload.user_id,
-            action="review.drop",
+            action="review.withdraw" if withdrawn else "review.drop",
             target=f"submission:{submission.id}",
-            detail="photo review",
+            detail=reason,
         )
         await self._clear_buttons(submission)
         await self.annotate(
-            submission, embeds.vision_reviewed(False, payload.user_id)
+            submission, embeds.vision_reviewed(False, payload.user_id, withdrawn=withdrawn)
         )
 
         machine = self.store.get_table(guild_id, submission.table_id)

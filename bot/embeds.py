@@ -205,10 +205,14 @@ def vision_status(result: VisionResult, table_name: str | None = None) -> str:
     return text
 
 
-def vision_reviewed(approved: bool, reviewer_id: int) -> str:
+def vision_reviewed(
+    approved: bool, reviewer_id: int, *, withdrawn: bool = False
+) -> str:
     """Replaces the status line once a human has ruled on a flag."""
     if approved:
         return f"reviewed by <@{reviewer_id}> — the score stands."
+    if withdrawn:
+        return f"withdrawn by <@{reviewer_id}>."
     return f"reviewed by <@{reviewer_id}> — score dropped."
 
 

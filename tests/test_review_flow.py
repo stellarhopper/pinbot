@@ -10,7 +10,7 @@ from __future__ import annotations
 from bot.review import APPROVE, DROP
 from bot.vision import VisionResult
 
-from fakes import ALICE, BOB, BOT_USER, GUILD, FakeMember, Harness
+from fakes import ALICE, BOB, BOT_USER, CARL, GUILD, FakeMember, Harness
 
 ADMIN = 99
 MISMATCH = VisionResult("mismatch", score=1_200_000, reasoning="read 1,200,000")
@@ -400,4 +400,126 @@ async def test_the_last_check_is_remembered_for_config_show(tmp_path, monkeypatc
     verdict, reasoning, _when = hx.review.last_check
     assert verdict == "unavailable"
     assert "out of credit" in reasoning
+    hx.close()
+
+
+# --------------------------------------------------- the player's own score
+
+async def test_the_submitter_can_withdraw_their_own_flagged_score(tmp_path, monkeypatch):
+    """Most flags are the player's own typo. Letting them take it back in one
+    tap keeps it off the admins' desk entirely."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    await hx.submit("Godzilla", "1,000,000", user_id=BOB, name="bob")
+    previous = hx.king("Godzilla")
+    submission, proof = await flagged(hx)          # ALICE's, and it's on top
+    assert hx.king("Godzilla").id == submission.id
+
+    await hx.react(proof.id, DROP, user_id=ALICE, member=FakeMember(ALICE))
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.is_voided
+    assert stored.void_reason == "withdrawn by the player"
+    assert not stored.is_pending_review
+    assert hx.king("Godzilla").id == previous.id, "the crown goes back"
+    assert "review.withdraw" in hx.audit_actions()
+    assert "review.drop" not in hx.audit_actions(), "a withdrawal is its own event"
+    hx.close()
+
+
+async def test_the_submitter_cannot_approve_their_own_flagged_score(tmp_path, monkeypatch):
+    """Owning a score is enough to take it back, never enough to certify it —
+    otherwise a mismatch is settled by the one person who wants it kept."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)
+
+    await hx.react(proof.id, APPROVE, user_id=ALICE, member=FakeMember(ALICE))
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.is_pending_review, "still waiting for an admin"
+    assert stored.reviewed_at is None
+    assert "review.approve" not in hx.audit_actions()
+    hx.close()
+
+
+async def test_another_player_still_cannot_drop_it(tmp_path, monkeypatch):
+    """The grant is ownership, not 'being a player'."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)          # ALICE's
+
+    await hx.react(proof.id, DROP, user_id=CARL, member=FakeMember(CARL))
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.is_pending_review
+    assert not stored.is_voided
+    hx.close()
+
+
+async def test_a_player_cannot_withdraw_a_score_that_was_never_flagged(
+    tmp_path, monkeypatch
+):
+    """This is 'withdraw the thing the check queried', not 'delete your own
+    scores at will'. /drop stays the admin path for everything else."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    await hx.submit("Godzilla", "5,000,000", user_id=ALICE)
+    proof = hx.channel.sent[-1]
+    submission = hx.store.get_submission_by_proof_message(GUILD, proof.id)
+
+    await hx.react(proof.id, DROP, user_id=ALICE, member=FakeMember(ALICE))
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert not stored.is_voided, "an unflagged score is not self-serve"
+    assert stored.reviewed_at is None
+    hx.close()
+
+
+async def test_a_withdrawal_needs_no_member_object(tmp_path, monkeypatch):
+    """Ownership is decided from the user ID the gateway already gave us, so a
+    payload without a member still lets the player take their own score back —
+    unlike the admin grant, which fails closed there."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)
+
+    await hx.react(proof.id, DROP, user_id=ALICE, member=None)
+
+    assert hx.store.get_submission(GUILD, submission.id).is_voided
+    hx.close()
+
+
+async def test_the_photo_says_who_withdrew_it(tmp_path, monkeypatch):
+    hx = await Harness.create(tmp_path, monkeypatch)
+    _submission, proof = await flagged(hx)
+
+    await hx.react(proof.id, DROP, user_id=ALICE, member=FakeMember(ALICE))
+
+    field = proof.embeds[0].fields[-1]
+    assert "withdrawn by" in field.value
+    assert f"<@{ALICE}>" in field.value
+    assert "dropped" not in field.value, "a withdrawal doesn't read as a ruling"
+    hx.close()
+
+
+async def test_the_flag_tells_the_player_they_can_withdraw_it(tmp_path, monkeypatch):
+    """A player who doesn't know the option exists still costs an admin time."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    hx.store.add_admin_role(GUILD, 777)
+    await flagged(hx)
+
+    notice = hx.channel.sent[-1]
+    assert "withdraw it yourself" in notice.content
+    assert "<@&777>" in notice.content, "and the admins are still called"
+    hx.close()
+
+
+async def test_an_admin_dropping_someone_elses_score_is_still_a_ruling(
+    tmp_path, monkeypatch
+):
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)          # ALICE's
+
+    await hx.react(proof.id, DROP, user_id=ADMIN)
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.void_reason == "photo review"
+    assert "review.drop" in hx.audit_actions()
+    assert "review.withdraw" not in hx.audit_actions()
     hx.close()
