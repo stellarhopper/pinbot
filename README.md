@@ -14,7 +14,7 @@ needs editing on disk beyond the bot token.
 | Command | Who | What |
 | --- | --- | --- |
 | `/new <table> <score> <proof> [note]` | anyone | Report a score. Photo required. |
-| `/hs [table]` | anyone | Current high scores — all tables, or one in detail. |
+| `/hs [table]` | anyone | Current high scores. Omit for a summary of every table, name one for its full detail, or `*` for every table in full. |
 | `/tournament start [name] [ends_in]` | admin | Open the submission window. `ends_in` takes `36h`, `2d`, `2d 4h 30m`, `90m`, `1w`. |
 | `/tournament end` | admin | Close it and announce the winners. |
 | `/tournament extend <duration>` | admin | Push the end out — also reopens a tournament ended by mistake. |
@@ -309,7 +309,7 @@ silently.
 .venv/bin/python -m pytest
 ```
 
-373 tests, no Discord connection needed, under a second. Two tiers:
+386 tests, no Discord connection needed, under a second. Two tiers:
 
 **Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
 `test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,

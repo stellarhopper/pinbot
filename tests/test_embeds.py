@@ -415,3 +415,47 @@ def test_headings_only_appear_where_discord_renders_them(builder):
             line for line in field.value.split("\n") if line.lstrip().startswith("#")
         ]
         assert not offenders, f"heading in the field {field.name!r}: {offenders}"
+
+
+# --------------------------------------------------------------- chunking
+
+def _embed(chars: int) -> "embeds.discord.Embed":
+    from bot import embeds as e
+    return e.discord.Embed(description="x" * chars)
+
+
+def test_a_small_set_stays_in_one_message():
+    assert len(embeds.chunk_embeds([_embed(100) for _ in range(5)])) == 1
+
+
+def test_the_ten_embed_cap_is_respected():
+    pages = embeds.chunk_embeds([_embed(10) for _ in range(23)])
+    assert [len(p) for p in pages] == [10, 10, 3]
+
+
+def test_the_character_cap_splits_before_the_count_cap():
+    """The limit that actually bites: ten embeds are allowed, but not if they
+    total more than 6000 characters between them."""
+    pages = embeds.chunk_embeds([_embed(1000) for _ in range(10)])
+    assert all(sum(len(e) for e in p) <= embeds.MAX_EMBED_CHARS_PER_MESSAGE for p in pages)
+    assert len(pages) == 2
+    assert sum(len(p) for p in pages) == 10, "nothing may be dropped"
+
+
+def test_nothing_is_ever_dropped():
+    built = [_embed(700) for _ in range(31)]
+    pages = embeds.chunk_embeds(built)
+    assert sum(len(p) for p in pages) == 31
+    for page in pages:
+        assert len(page) <= embeds.MAX_EMBEDS_PER_MESSAGE
+        assert sum(len(e) for e in page) <= embeds.MAX_EMBED_CHARS_PER_MESSAGE
+
+
+def test_an_oversized_embed_gets_a_message_to_itself():
+    """Dropping it would silently lose a table from the standings."""
+    pages = embeds.chunk_embeds([_embed(100), _embed(5999), _embed(100)])
+    assert sum(len(p) for p in pages) == 3
+
+
+def test_no_embeds_means_no_messages():
+    assert embeds.chunk_embeds([]) == []

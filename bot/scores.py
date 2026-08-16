@@ -17,6 +17,12 @@ from .store import Store, Submission, Table, Tournament
 
 log = logging.getLogger(__name__)
 
+# What to type into /hs to expand every table instead of summarising it. A real
+# table is always resolved first, so a machine actually called "All" still wins
+# and nobody loses access to their own table.
+ALL_TABLES = "*"
+ALL_TABLES_ALIASES = ("*", "all")
+
 
 class ScoresCog(commands.Cog):
     def __init__(self, bot: commands.Bot, store: Store, urls: proofs.ProofURLCache) -> None:
@@ -57,6 +63,24 @@ class ScoresCog(commands.Cog):
             for table in self.store.list_tables(interaction.guild_id)
             if needle in table.name.lower()
         ][:25]
+
+    async def hs_table_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Table names, plus the option to expand every one of them.
+
+        Deliberately separate from table_autocomplete: /new takes a machine you
+        actually played, and offering "all tables" there would be nonsense.
+        """
+        choices = await self.table_autocomplete(interaction, current)
+        if current.strip().lower() in ("", *ALL_TABLES_ALIASES):
+            choices.insert(
+                0,
+                app_commands.Choice(
+                    name="\N{BLACK STAR} All tables — full detail", value=ALL_TABLES
+                ),
+            )
+        return choices[:25]
 
     # ------------------------------------------------------------------- /new
 
@@ -340,8 +364,10 @@ class ScoresCog(commands.Cog):
     # -------------------------------------------------------------------- /hs
 
     @app_commands.command(name="hs", description="Show the current high scores.")
-    @app_commands.describe(table="Show one table in detail (omit for all tables)")
-    @app_commands.autocomplete(table=table_autocomplete)
+    @app_commands.describe(
+        table="One table in detail, or * for every table in detail (omit for a summary)"
+    )
+    @app_commands.autocomplete(table=hs_table_autocomplete)
     @app_commands.guild_only()
     async def hs(self, interaction: discord.Interaction, table: str | None = None) -> None:
         await interaction.response.defer(thinking=True)
@@ -364,28 +390,31 @@ class ScoresCog(commands.Cog):
             return
 
         if table is not None:
+            # A real table wins over the wildcard, so a machine actually called
+            # "All" is still reachable by name.
             machine = self.store.get_table_by_name(guild_id, table)
-            if machine is None:
-                names = ", ".join(f"**{t.name}**" for t in tables)
+            if machine is not None:
                 await interaction.followup.send(
-                    f"I don't have a table called **{table}**. Try one of: {names}"
+                    embed=await self._detail_embed(guild_id, tournament, machine),
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
                 return
-            standings = self.store.standings(guild_id, tournament.id, machine.id, limit=6)
-            king = standings[0] if standings else None
-            fresh = await self._fresh(king)
-            stats = self.store.table_stats(guild_id, tournament.id, machine.id, king=king)
-            avatar = await self.avatars.url_for(self.bot, king)
-            await interaction.followup.send(
-                embed=embeds.table_detail_embed(
-                    machine, king, standings, stats, fresh, avatar
-                ),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            if table.strip().lower() not in ALL_TABLES_ALIASES:
+                names = ", ".join(f"**{t.name}**" for t in tables)
+                await interaction.followup.send(
+                    f"I don't have a table called **{table}**. Try one of: {names}, "
+                    f"or `{ALL_TABLES}` for every table in detail."
+                )
+                return
+            built = [
+                await self._detail_embed(guild_id, tournament, machine)
+                for machine in tables
+            ]
+            await self._send_standings(interaction, guild_id, tournament, tables, built)
             return
 
-        built: list[discord.Embed] = []
-        for machine in tables[:10]:  # Discord caps a message at 10 embeds
+        built = []
+        for machine in tables:
             top = self.store.standings(guild_id, tournament.id, machine.id, limit=2)
             king = top[0] if top else None
             runner_up = top[1] if len(top) > 1 else None
@@ -397,13 +426,41 @@ class ScoresCog(commands.Cog):
                     machine, king, runner_up, stats, fresh, avatar
                 )
             )
+        await self._send_standings(interaction, guild_id, tournament, tables, built)
+        return
 
+    async def _detail_embed(
+        self, guild_id: int, tournament: Tournament, machine: Table
+    ) -> discord.Embed:
+        standings = self.store.standings(guild_id, tournament.id, machine.id, limit=6)
+        king = standings[0] if standings else None
+        fresh = await self._fresh(king)
+        stats = self.store.table_stats(guild_id, tournament.id, machine.id, king=king)
+        avatar = await self.avatars.url_for(self.bot, king)
+        return embeds.table_detail_embed(machine, king, standings, stats, fresh, avatar)
+
+    async def _send_standings(
+        self,
+        interaction: discord.Interaction,
+        guild_id: int,
+        tournament: Tournament,
+        tables: list[Table],
+        built: list[discord.Embed],
+    ) -> None:
+        """Post the standings across as many messages as Discord requires.
+
+        The header goes on the first message only. Previously this sent one
+        message capped at ten embeds, which silently dropped every table past
+        the tenth — invisible until the one event big enough to hit it.
+        """
         submissions, players = self.store.tournament_stats(guild_id, tournament.id)
-        await interaction.followup.send(
-            embeds.standings_header(tournament, submissions, players, len(tables)),
-            embeds=built,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        header = embeds.standings_header(tournament, submissions, players, len(tables))
+        for index, page in enumerate(embeds.chunk_embeds(built)):
+            await interaction.followup.send(
+                header if index == 0 else None,
+                embeds=page,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
 
     async def _fresh(self, submission: Submission | None) -> str | None:
         if submission is None:

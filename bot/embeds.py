@@ -224,6 +224,40 @@ def strip_vision_line(content: str | None) -> str:
     return "\n".join(kept).rstrip()
 
 
+# Discord's two limits on a single message, both of which /hs can reach on a
+# real event: ten embeds, and 6000 characters summed across all of them. The
+# character one is the easy one to miss, because it only bites once table names
+# and standings get long — i.e. at the event, not in testing.
+MAX_EMBEDS_PER_MESSAGE = 10
+MAX_EMBED_CHARS_PER_MESSAGE = 6000
+
+
+def chunk_embeds(built: list[discord.Embed]) -> list[list[discord.Embed]]:
+    """Split embeds into messages that Discord will actually accept.
+
+    Returns at least one page for a non-empty input. An embed too large to
+    share a message with anything gets one of its own rather than being
+    dropped: silently losing a table from the standings is the failure this
+    exists to prevent.
+    """
+    pages: list[list[discord.Embed]] = []
+    page: list[discord.Embed] = []
+    used = 0
+    for embed in built:
+        size = len(embed)
+        if page and (
+            len(page) >= MAX_EMBEDS_PER_MESSAGE
+            or used + size > MAX_EMBED_CHARS_PER_MESSAGE
+        ):
+            pages.append(page)
+            page, used = [], 0
+        page.append(embed)
+        used += size
+    if page:
+        pages.append(page)
+    return pages
+
+
 # ----------------------------------------------------------------- standings
 
 def table_summary_embed(

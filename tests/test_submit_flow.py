@@ -20,6 +20,7 @@ from fakes import (
     CARL,
     BrokenChannel,
     FakeAttachment,
+    FakeInteraction,
     Harness,
     NoHistoryChannel,
 )
@@ -407,4 +408,95 @@ async def test_a_deleted_proof_message_degrades_to_the_jump_link(tmp_path, monke
     embed = itx.embed_list[0]
     assert embed.thumbnail.url is None, "no thumbnail when the photo is gone"
     assert "view proof" in embed.description, "the permanent link still works"
+    h.close()
+
+
+# --------------------------------------------------------- /hs * (all tables)
+
+async def test_hs_star_expands_every_table_in_full(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "9,000,000", user_id=ALICE)
+    await h.submit("Godzilla", "5,000,000", user_id=BOB, name="bob")
+
+    itx = await h.hs("*")
+
+    listing = itx.embed_list
+    assert len(listing) == 2, "one detail embed per table"
+    godzilla = listing[0]
+    # The detail shape, not the summary one: summaries have no field breakdown.
+    assert {f.name for f in godzilla.fields} >= {"Held for", "Margin"}
+    assert "Chasing" in {f.name for f in godzilla.fields}
+    assert "current standings" in itx.reply, "the header still leads"
+    h.close()
+
+
+async def test_hs_all_is_accepted_as_a_word_too(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "9,000,000", user_id=ALICE)
+
+    for spelling in ("all", "ALL", "  All  "):
+        itx = await h.hs(spelling)
+        assert len(itx.embed_list) == 2, f"{spelling!r} should expand everything"
+    h.close()
+
+
+async def test_a_real_table_beats_the_wildcard(tmp_path, monkeypatch):
+    """A machine actually called 'All' must stay reachable by name."""
+    h = await Harness.create(tmp_path, monkeypatch, tables=("All", "Godzilla"))
+    await h.submit("All", "9,000,000", user_id=ALICE)
+
+    itx = await h.hs("All")
+
+    assert itx.embed.title.startswith("All"), "resolved as the table, not the wildcard"
+    h.close()
+
+
+async def test_hs_summary_no_longer_drops_tables_past_the_tenth(tmp_path, monkeypatch):
+    """It used to send one message capped at ten embeds, which silently lost
+    every table after that — invisible until an event big enough to hit it."""
+    names = tuple(f"Table {n:02d}" for n in range(1, 15))
+    h = await Harness.create(tmp_path, monkeypatch, tables=names)
+
+    itx = await h.hs()
+
+    shown = [e for kind, _c, _e, embeds_ in itx.record if embeds_ for e in embeds_]
+    assert len(shown) == 14, "every table is accounted for"
+    titles = " ".join(e.title for e in shown)
+    assert "Table 14" in titles and "Table 01" in titles
+    h.close()
+
+
+async def test_hs_star_splits_across_messages_when_it_has_to(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch, tables=tuple(
+        f"Table {n:02d}" for n in range(1, 15)
+    ))
+
+    itx = await h.hs("*")
+
+    pages = [embeds_ for _k, _c, _e, embeds_ in itx.record if embeds_]
+    assert len(pages) > 1, "14 detail embeds cannot fit in one message"
+    assert all(len(p) <= 10 for p in pages)
+    assert sum(len(p) for p in pages) == 14
+    h.close()
+
+
+async def test_the_hs_autocomplete_offers_the_wildcard(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    itx = FakeInteraction()
+
+    choices = await h.scores.hs_table_autocomplete(itx, "")
+    assert choices[0].value == "*"
+    assert "All tables" in choices[0].name
+
+    # Once you're typing a real name it gets out of the way.
+    narrowed = await h.scores.hs_table_autocomplete(itx, "godz")
+    assert [c.value for c in narrowed] == ["Godzilla"]
+    h.close()
+
+
+async def test_the_new_autocomplete_does_not_offer_the_wildcard(tmp_path, monkeypatch):
+    """/new takes a machine you actually played."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    choices = await h.scores.table_autocomplete(FakeInteraction(), "")
+    assert "*" not in [c.value for c in choices]
     h.close()
