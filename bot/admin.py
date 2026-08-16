@@ -884,10 +884,21 @@ class AdminCog(commands.Cog):
         guild_id = interaction.guild_id
         entries = self.store.audit_entries(guild_id, limit=max(1, min(limit, 40)))
         await interaction.response.send_message(
-            embed=embeds.audit_embed(entries, self.store.audit_count(guild_id)),
+            embed=embeds.audit_embed(
+                entries,
+                self.store.audit_count(guild_id),
+                links=self._audit_links(guild_id, entries),
+            ),
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    def _audit_links(self, guild_id: int, entries: list) -> dict[str, str]:
+        """Jump URLs for the audit entries that point at a proof post."""
+        urls = self.store.proof_links(guild_id, embeds.audit_submission_ids(entries))
+        return {
+            f"{embeds.SUBMISSION_TARGET}{sid}": url for sid, url in urls.items()
+        }
 
     @audit_group.command(
         name="clear", description="Admin: erase the audit trail once the event is settled."

@@ -384,13 +384,41 @@ def standings_header(
     return " · ".join(bits)
 
 
+SUBMISSION_TARGET = "submission:"
+
+
+def audit_submission_ids(entries: list[AuditEntry]) -> list[int]:
+    """Submission IDs referenced by these audit entries.
+
+    The ``target`` format is written in half a dozen places; this is the one
+    place that reads it, so a change to the format breaks here rather than
+    silently producing an audit log with no links in it.
+    """
+    found: list[int] = []
+    for entry in entries:
+        if not entry.target or not entry.target.startswith(SUBMISSION_TARGET):
+            continue
+        try:
+            found.append(int(entry.target[len(SUBMISSION_TARGET):]))
+        except ValueError:
+            continue
+    return found
+
+
 def audit_embed(
-    entries: list[AuditEntry], total: int, cleared_note: str | None = None
+    entries: list[AuditEntry],
+    total: int,
+    cleared_note: str | None = None,
+    links: dict[str, str] | None = None,
 ) -> discord.Embed:
     """The admin action trail: who did what, when, and why.
 
     Exists because everything else in the bot writes to this log and nothing
     could read it — the record was only reachable by opening the database.
+
+    ``links`` maps a target to the proof post it refers to. Plenty of entries
+    have nowhere to jump — a config change, a purge, a score whose photo never
+    posted — and those simply read as they did before.
     """
     if not entries:
         return discord.Embed(
@@ -408,6 +436,8 @@ def audit_embed(
         parts = [f"{ts(entry.at, 'f')} · <@{entry.actor_id}> · `{entry.action}`"]
         if entry.target:
             parts.append(f"`{entry.target}`")
+            if url := (links or {}).get(entry.target):
+                parts.append(f"[jump]({url})")
         line = " · ".join(parts)
         if entry.detail:
             line += f"\n　　{entry.detail}"

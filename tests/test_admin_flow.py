@@ -12,7 +12,7 @@ import types
 
 import bot.admin as admin_module
 import bot.vision as vision_module
-from bot import channels, review
+from bot import channels, embeds, review
 from bot.vision import VisionResult
 from bot.store import now
 
@@ -1112,4 +1112,88 @@ async def test_config_show_counts_what_is_waiting(tmp_path, monkeypatch):
     fields = {f.name.split(" (")[0]: f.value for f in itx.embed.fields}
 
     assert "1** waiting" in fields["Photo cross-check"]
+    h.close()
+
+
+# --------------------------------------------------- audit jump links
+
+async def test_audit_links_to_the_photo_a_void_was_about(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "9,000,000", user_id=ALICE)
+    proof = h.channel.last
+    leader = h.king("Godzilla")
+
+    await h.run(h.admin.drop, FakeInteraction(), id=leader.id, reason="not on the machine")
+    itx = await h.run(h.admin.audit_show, FakeInteraction())
+
+    body = itx.embed.description
+    assert f"submission:{leader.id}" in body
+    assert f"[jump]({proof.jump_url})" in body, "the void points at the photo"
+    h.close()
+
+
+async def test_audit_entries_with_nowhere_to_go_are_unchanged(tmp_path, monkeypatch):
+    """Config changes, purges and tournament events have no message behind them,
+    and that's fine — they must not sprout a broken link."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    role = types.SimpleNamespace(id=777, mention="@Staff")
+    await h.run(h.admin.admin_role_add, FakeInteraction(), role=role)
+
+    itx = await h.run(h.admin.audit_show, FakeInteraction())
+
+    body = itx.embed.description
+    assert "config.admin_role.add" in body
+    assert "jump" not in body
+    h.close()
+
+
+async def test_a_submission_whose_photo_never_posted_gets_no_link(tmp_path, monkeypatch):
+    """The row exists and is audited, but there's no proof message to jump to."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    submission, _, _ = h.store.add_submission(
+        guild_id=GUILD, tournament_id=h.tournament.id,
+        table_id=h.table_id("Godzilla"), user_id=ALICE,
+        user_display="alice", score=1_000_000,
+    )
+    h.store.log(GUILD, actor_id=99, action="drop", target=f"submission:{submission.id}")
+
+    itx = await h.run(h.admin.audit_show, FakeInteraction())
+
+    assert f"submission:{submission.id}" in itx.embed.description
+    assert "jump" not in itx.embed.description
+    h.close()
+
+
+async def test_every_review_action_in_the_trail_is_jumpable(tmp_path, monkeypatch):
+    """The flag, and the decision that resolved it, both point at the photo."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "9,000,000", user_id=ALICE)
+    proof = h.channel.last
+    submission = h.store.get_submission_by_proof_message(GUILD, proof.id)
+    await h.flag(submission, VisionResult("mismatch", score=1_000_000))
+    await h.react(proof.id, review.DROP, user_id=99)
+
+    itx = await h.run(h.admin.audit_show, FakeInteraction())
+
+    body = itx.embed.description
+    assert "review.flag" in body and "review.drop" in body
+    assert body.count(f"[jump]({proof.jump_url})") == 2
+    h.close()
+
+
+async def test_the_links_are_one_query_however_long_the_log(tmp_path, monkeypatch):
+    """40 audit entries must not become 40 lookups to render one embed."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    for _ in range(6):
+        await h.submit("Godzilla", "1,000,000", user_id=ALICE)
+    entries = h.store.audit_entries(GUILD, limit=40)
+    ids = embeds.audit_submission_ids(entries)
+
+    calls = {"n": 0}
+    real = h.store.proof_links
+    monkeypatch.setattr(h.store, "proof_links", lambda g, i: (calls.__setitem__("n", calls["n"] + 1), real(g, i))[1])
+    await h.run(h.admin.audit_show, FakeInteraction())
+
+    assert calls["n"] == 1
+    assert isinstance(ids, list)
     h.close()

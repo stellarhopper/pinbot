@@ -28,7 +28,7 @@ needs editing on disk beyond the bot token.
 | `/drop <id> [reason]` | admin | Void a score; the crown reverts. Autocompletes with standing kings first. |
 | `/restore <id>` | admin | Un-void. Autocompletes with the most recent void first. |
 | `/history <table> [limit]` | admin | Full ledger for a table, voided entries included. |
-| `/audit show [limit]` | admin | Who did what: voids, purges, config and tournament changes. |
+| `/audit show [limit]` | admin | Who did what: voids, purges, config and tournament changes. Entries about a score link straight to its photo. |
 | `/audit clear` | admin | Erase the trail once the event is settled. |
 | `/drophs` | admin | Delete all scores for the current tournament. |
 | `/droptables` | admin | Delete all tables *and* their scores. |
@@ -309,7 +309,7 @@ silently.
 .venv/bin/python -m pytest
 ```
 
-386 tests, no Discord connection needed, under a second. Two tiers:
+393 tests, no Discord connection needed, under a second. Two tiers:
 
 **Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
 `test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,

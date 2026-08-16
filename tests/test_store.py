@@ -671,6 +671,51 @@ def test_proof_message_lookup_is_guild_scoped(store):
     assert theirs.store.submission_count(OTHER_GUILD, theirs.tournament.id) == 0
 
 
+def test_proof_links_are_guild_scoped_and_skip_missing_photos(store):
+    """Feeds the audit log's jump links, so it must not reach another guild's
+    ledger, and must not hand back a link for a score that has no proof post."""
+    mine = Fixture(store, GUILD)
+    Fixture(store, OTHER_GUILD)
+    posted, _, _ = mine.submit(ALICE, 1_000_000)
+    unposted, _, _ = mine.submit(BOB, 2_000_000)
+    store.attach_proof(
+        GUILD, posted.id, channel_id=900, message_id=7001,
+        jump_url="https://discord.com/channels/1/2/3", filename="proof.jpg",
+    )
+
+    links = store.proof_links(GUILD, [posted.id, unposted.id])
+    assert links == {posted.id: "https://discord.com/channels/1/2/3"}
+    assert unposted.id not in links, "no photo means no link, not a null one"
+
+    assert store.proof_links(OTHER_GUILD, [posted.id]) == {}, "another guild sees nothing"
+    assert store.proof_links(GUILD, []) == {}
+    assert store.proof_links(GUILD, [999_999]) == {}
+
+
+def test_proof_links_takes_one_query_for_many_ids(store):
+    """The audit log renders up to 40 entries; one query each would be 40 round
+    trips to draw a single embed."""
+    fx = Fixture(store, GUILD)
+    ids = []
+    for n in range(8):
+        sub, _, _ = fx.submit(ALICE, 1_000_000 + n)
+        store.attach_proof(
+            GUILD, sub.id, channel_id=900, message_id=7000 + n,
+            jump_url=f"https://discord.com/channels/1/2/{n}", filename="p.jpg",
+        )
+        ids.append(sub.id)
+
+    statements = []
+    store._conn.set_trace_callback(statements.append)
+    try:
+        assert len(store.proof_links(GUILD, ids)) == 8
+    finally:
+        store._conn.set_trace_callback(None)
+
+    selects = [q for q in statements if q.lstrip().upper().startswith("SELECT")]
+    assert len(selects) == 1, f"batched, not one lookup per submission: {selects}"
+
+
 def test_pending_flags_lists_the_queue_oldest_first(fx):
     first, _, _ = fx.submit(ALICE, 1_000_000)
     second, _, _ = fx.submit(BOB, 2_000_000)

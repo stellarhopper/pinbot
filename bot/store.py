@@ -975,6 +975,29 @@ class Store:
                 return None
         return self._get_submission(guild_id, submission_id)
 
+    def proof_links(
+        self, guild_id: int, submission_ids: Iterable[int]
+    ) -> dict[int, str]:
+        """Jump URLs for the submissions that have one, keyed by id.
+
+        Batched because the audit log shows up to 40 entries and a query each
+        would be 40 round trips to render one embed. Submissions with no proof
+        post — the photo failed to upload, or the row predates it — are simply
+        absent from the result.
+        """
+        ids = sorted({int(i) for i in submission_ids})
+        if not ids:
+            return {}
+        # Placeholders are generated from the count, never from the values.
+        placeholders = ",".join("?" * len(ids))
+        rows = self._conn.execute(
+            "SELECT id, proof_jump_url FROM submissions "
+            f"WHERE guild_id = ? AND id IN ({placeholders}) "
+            "AND proof_jump_url IS NOT NULL",
+            (guild_id, *ids),
+        )
+        return {row["id"]: row["proof_jump_url"] for row in rows}
+
     def pending_flags(self, guild_id: int, tournament_id: int) -> list[Submission]:
         """Flagged, undecided submissions, oldest first — the review queue."""
         rows = self._conn.execute(
