@@ -485,7 +485,10 @@ def _links(n: int):
 def test_a_short_log_is_still_a_single_embed():
     built = embeds.audit_embeds(_audit(5), 5, links=_links(5))
     assert len(built) == 1
-    assert "5" in built[0].footer.text
+    footer = built[0].footer.text
+    assert "showing all 5" in footer
+    assert "limit" not in footer, "nothing was held back, so don't offer more"
+    assert "pages" not in footer
 
 
 def test_a_long_log_pages_instead_of_being_cut_off():
@@ -522,6 +525,18 @@ def test_the_footer_counts_what_was_actually_shown():
     assert "40 of 900" in footer
     assert "pages" in footer, "and says it spans several"
     assert all(p.footer.text is None for p in built[:-1]), "one footer, on the last page"
+
+
+def test_a_truncated_log_says_how_to_see_the_rest():
+    """'showing 15 of 17' alone reads like a page that never arrived."""
+    footer = embeds.audit_embeds(_audit(15), 17, links=_links(15))[-1].footer.text
+    assert "showing 15 of 17" in footer
+    assert "/audit show limit:17" in footer
+
+
+def test_the_suggested_limit_never_exceeds_what_the_command_accepts():
+    footer = embeds.audit_embeds(_audit(15), 5000, links=_links(15))[-1].footer.text
+    assert "/audit show limit:40" in footer, "40 is the cap; don't suggest 5000"
 
 
 def test_paged_audit_still_fits_discords_message_limits():

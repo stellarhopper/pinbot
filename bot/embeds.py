@@ -479,9 +479,16 @@ def audit_embeds(
         )
         built.append(embed)
 
-    suffix = f" of {total}" if total > len(entries) else ""
-    tail = ", newest first" if len(built) == 1 else f", newest first · {len(built)} pages"
-    built[-1].set_footer(text=f"showing {len(entries)}{suffix} entr(ies){tail}")
+    # Say what was held back *and how to see it*. "showing 15 of 17" states a
+    # fact and leaves you guessing whether the rest is on a page that never
+    # arrived; naming the command answers the question the footer provokes.
+    parts = [f"showing {len(entries)} of {total}" if total > len(entries)
+             else f"showing all {len(entries)}", "newest first"]
+    if len(built) > 1:
+        parts.append(f"{len(built)} pages")
+    if total > len(entries):
+        parts.append(f"/audit show limit:{min(total, 40)} for the rest")
+    built[-1].set_footer(text=" · ".join(parts))
     return built
 
 
