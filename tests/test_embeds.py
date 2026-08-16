@@ -50,6 +50,7 @@ def sub(
         flagged_at=None,
         reviewed_at=None,
         reviewed_by=None,
+        flag_message_id=None,
     )
 
 

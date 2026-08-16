@@ -274,6 +274,10 @@ fires. Every decision is audited. `/flagged` lists anything still waiting, and t
 appears under the photo itself — including when the check couldn't run, so a broken check
 never looks like a working one.
 
+Once a flag is resolved, the bot deletes its own ping. The outcome is already on the photo,
+in `/audit` and in the ledger, so all that's left to remove is a call to action nobody needs
+to answer. Nothing else is ever deleted — the proof photo stays put.
+
 **The player can withdraw their own flagged score.** Most flags are the player's own typo,
 and letting them take it back with one ❌ keeps it off the admins' desk entirely. The grant
 is deliberately asymmetric: owning a score is enough to withdraw it, never enough to approve
@@ -305,7 +309,7 @@ silently.
 .venv/bin/python -m pytest
 ```
 
-367 tests, no Discord connection needed, under a second. Two tiers:
+373 tests, no Discord connection needed, under a second. Two tiers:
 
 **Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
 `test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,

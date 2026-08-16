@@ -31,9 +31,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-# 2 added submissions.user_avatar. 3 added the photo-review columns. Bump
-# alongside a matching _MIGRATIONS entry.
-SCHEMA_VERSION = 3
+# 2 added submissions.user_avatar. 3 added the photo-review columns. 4 added
+# flag_message_id. Bump alongside a matching _MIGRATIONS entry.
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS submissions (
     vision_verdict   TEXT,
     flagged_at       INTEGER,
     reviewed_at      INTEGER,
-    reviewed_by      INTEGER
+    reviewed_by      INTEGER,
+    flag_message_id  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_submissions_standings
     ON submissions (guild_id, tournament_id, table_id, voided_at, score DESC);
@@ -125,6 +126,7 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("submissions", "flagged_at", "INTEGER"),
     ("submissions", "reviewed_at", "INTEGER"),
     ("submissions", "reviewed_by", "INTEGER"),
+    ("submissions", "flag_message_id", "INTEGER"),
 )
 
 # Setting keys, so typos surface here rather than as a silently missing value.
@@ -283,6 +285,11 @@ class Submission:
     flagged_at: int | None
     reviewed_at: int | None
     reviewed_by: int | None
+    # The bot's own "worth a second look" notice, so it can be cleaned up once
+    # the flag is resolved. Persisted rather than held in memory because a
+    # tournament outlives a deploy, and an orphaned ping would sit there for
+    # days with nothing left to act on.
+    flag_message_id: int | None
 
     @property
     def is_voided(self) -> bool:
@@ -929,6 +936,17 @@ class Store:
                 (at or now(), guild_id, submission_id),
             )
         return self._get_submission(guild_id, submission_id)
+
+    def set_flag_message(
+        self, guild_id: int, submission_id: int, message_id: int | None
+    ) -> None:
+        """Remember (or forget) the notice posted about a flag."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE submissions SET flag_message_id = ? "
+                "WHERE guild_id = ? AND id = ?",
+                (message_id, guild_id, submission_id),
+            )
 
     def review_submission(
         self, guild_id: int, submission_id: int, *, by: int, at: int | None = None

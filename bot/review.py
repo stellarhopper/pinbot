@@ -138,7 +138,7 @@ class ReviewCog(commands.Cog):
                 return
 
             admin_role_ids = self.store.get_admin_role_ids(guild_id)
-            await proof.reply(
+            notice = await proof.reply(
                 flag_text(
                     user_id=submission.user_id,
                     table_name=table_name,
@@ -152,6 +152,12 @@ class ReviewCog(commands.Cog):
                     roles=[discord.Object(id=r) for r in admin_role_ids],
                 ),
             )
+            # Remembered so it can be cleared once the flag is resolved; the
+            # verdict line on the photo is the durable record, and a stale ping
+            # asking for a decision that has already been made is worse than no
+            # message at all.
+            if notice is not None:
+                self.store.set_flag_message(guild_id, submission.id, notice.id)
             await self._add_buttons(proof)
         except discord.HTTPException:
             log.exception("failed to post the flag for submission %s", submission.id)
@@ -321,6 +327,7 @@ class ReviewCog(commands.Cog):
             target=f"submission:{submission.id}",
         )
         await self._clear_buttons(submission)
+        await self._clear_notice(submission)
         # The verdict line under the photo becomes the record of the decision,
         # so an approved score needs no further message in the channel.
         await self.annotate(
@@ -353,6 +360,7 @@ class ReviewCog(commands.Cog):
             detail=reason,
         )
         await self._clear_buttons(submission)
+        await self._clear_notice(submission)
         await self.annotate(
             submission, embeds.vision_reviewed(False, payload.user_id, withdrawn=withdrawn)
         )
@@ -368,6 +376,32 @@ class ReviewCog(commands.Cog):
             submission,
             embed=embeds.void_embed(table_name, voided, new_king, payload.user_id),
         )
+
+    async def _clear_notice(self, submission: Submission) -> None:
+        """Delete the "worth a second look" ping now that it has been answered.
+
+        Deleting the bot's *own* message needs no Manage Messages, unlike the
+        blanket permission deleting anyone else's would take. The resolution
+        itself is not lost: it is on the photo, in the audit log, and in the
+        ledger — this only removes a call to action nobody needs to answer.
+        """
+        if not submission.flag_message_id:
+            return
+        channel = self._channel(submission)
+        get_partial = getattr(channel, "get_partial_message", None)
+        if get_partial is None:
+            return
+        try:
+            await get_partial(submission.flag_message_id).delete()
+        except discord.NotFound:
+            pass  # already gone; someone tidied up by hand
+        except discord.HTTPException:
+            log.info("could not delete the flag notice for %s", submission.id)
+        finally:
+            # Forget it either way. A message ID that no longer resolves is
+            # worth nothing, and retrying on every future lookup is worth less.
+            assert submission.guild_id is not None
+            self.store.set_flag_message(submission.guild_id, submission.id, None)
 
     async def _clear_buttons(self, submission: Submission) -> None:
         """Take our own ✅/❌ back off, so the buttons can't be pressed twice."""

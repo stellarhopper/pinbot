@@ -127,6 +127,9 @@ class FakeChannel(discord.abc.Messageable):
         # reproduce a server where the bot was never granted Add Reactions.
         self.reactions: dict[int, set[tuple[str, int]]] = {}
         self.reactions_forbidden = False
+        # Messages the bot deleted. They stay in `sent` so a test can still
+        # inspect what was said before it was cleaned up.
+        self.deleted: set[int] = set()
 
     def get_partial_message(self, message_id: int) -> FakePartialMessage:
         return FakePartialMessage(self, message_id)
@@ -189,6 +192,13 @@ class FakePartialMessage:
         message.reply_to = self.id
         self.channel.sent.append(message)
         return message
+
+    async def delete(self) -> None:
+        if self.id in self.channel.deleted:
+            raise discord.NotFound(
+                types.SimpleNamespace(status=404, reason="Not Found"), "unknown message"
+            )
+        self.channel.deleted.add(self.id)
 
 
 class FakeMember:
@@ -444,6 +454,10 @@ class Harness:
 
     def reactions_on(self, message_id: int) -> set[str]:
         return {e for e, _uid in self.channel.reactions.get(message_id, set())}
+
+    def live(self) -> list:
+        """Messages still in the channel — what someone scrolling would see."""
+        return [m for m in self.channel.sent if m.id not in self.channel.deleted]
 
     def set_manage_guild(self, allowed: bool) -> None:
         """Simulate a caller with, or without, the Manage Server permission."""

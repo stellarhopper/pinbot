@@ -547,10 +547,11 @@ def test_migration_adds_the_review_columns_to_a_v2_database(tmp_path):
 
     from bot import store as store_module
 
-    added = ("flagged_at", "reviewed_at", "reviewed_by")
+    added = ("flagged_at", "reviewed_at", "reviewed_by", "flag_message_id")
     v2_schema = store_module._SCHEMA
     for column in added:
         v2_schema = re.sub(rf"\n *{column} +INTEGER,?", "", v2_schema)
+    v2_schema = re.sub(r"\n *flag_message_id +INTEGER,?", "", v2_schema)
     v2_schema = v2_schema.replace("    vision_verdict   TEXT,", "    vision_verdict   TEXT")
     for column in added:
         assert column not in v2_schema, "the v2 shape must genuinely lack the column"

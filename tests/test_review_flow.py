@@ -523,3 +523,85 @@ async def test_an_admin_dropping_someone_elses_score_is_still_a_ruling(
     assert "review.drop" in hx.audit_actions()
     assert "review.withdraw" not in hx.audit_actions()
     hx.close()
+
+
+# ------------------------------------------------- clearing up the ping
+
+async def test_the_ping_is_deleted_once_an_admin_rules(tmp_path, monkeypatch):
+    """The verdict line on the photo is the durable record. A ping still asking
+    for a decision that has already been made is worse than no message."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)
+    notice = hx.channel.sent[-1]
+    assert notice.id in {m.id for m in hx.live()}
+
+    await hx.react(proof.id, APPROVE, user_id=ADMIN)
+
+    assert notice.id not in {m.id for m in hx.live()}, "the ping is cleaned up"
+    assert proof.id in {m.id for m in hx.live()}, "but never the photo"
+    assert "reviewed by" in proof.embeds[0].fields[-1].value
+    hx.close()
+
+
+async def test_the_ping_is_deleted_when_the_player_withdraws(tmp_path, monkeypatch):
+    hx = await Harness.create(tmp_path, monkeypatch)
+    _submission, proof = await flagged(hx)
+    notice = hx.channel.sent[-1]
+
+    await hx.react(proof.id, DROP, user_id=ALICE, member=FakeMember(ALICE))
+
+    assert notice.id not in {m.id for m in hx.live()}
+    hx.close()
+
+
+async def test_the_ping_survives_until_someone_actually_rules(tmp_path, monkeypatch):
+    """Ignored reactions must not clear the call to action."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    _submission, proof = await flagged(hx)
+    notice = hx.channel.sent[-1]
+
+    await hx.react(proof.id, DROP, user_id=CARL, member=FakeMember(CARL))
+    await hx.react(proof.id, APPROVE, user_id=ALICE, member=FakeMember(ALICE))
+    await hx.react(proof.id, "\N{PILE OF POO}", user_id=ADMIN)
+
+    assert notice.id in {m.id for m in hx.live()}, "still waiting on a real decision"
+    hx.close()
+
+
+async def test_the_notice_id_is_persisted_not_just_remembered(tmp_path, monkeypatch):
+    """A tournament outlives a deploy. Held in memory, the ID would be lost on
+    restart and the ping would sit there for days with nothing to act on."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, _proof = await flagged(hx)
+    notice = hx.channel.sent[-1]
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.flag_message_id == notice.id
+    hx.close()
+
+
+async def test_the_notice_id_is_forgotten_after_cleanup(tmp_path, monkeypatch):
+    """A message ID that no longer resolves is worth nothing, and retrying it
+    on every later lookup is worth less."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)
+
+    await hx.react(proof.id, APPROVE, user_id=ADMIN)
+
+    assert hx.store.get_submission(GUILD, submission.id).flag_message_id is None
+    hx.close()
+
+
+async def test_an_already_deleted_ping_is_not_an_error(tmp_path, monkeypatch):
+    """Someone may have tidied it up by hand. The review must still complete."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)
+    notice = hx.channel.sent[-1]
+    hx.channel.deleted.add(notice.id)          # deleted out from under us
+
+    await hx.react(proof.id, APPROVE, user_id=ADMIN)
+
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.reviewed_by == ADMIN, "the decision still lands"
+    assert stored.flag_message_id is None
+    hx.close()
