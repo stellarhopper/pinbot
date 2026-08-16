@@ -405,12 +405,17 @@ def audit_submission_ids(entries: list[AuditEntry]) -> list[int]:
     return found
 
 
-def audit_embed(
+# Discord's per-embed description cap is 4096; the margin absorbs the title and
+# footer, which count toward the message total that chunk_embeds then enforces.
+MAX_DESCRIPTION_CHARS = 3800
+
+
+def audit_embeds(
     entries: list[AuditEntry],
     total: int,
     cleared_note: str | None = None,
     links: dict[str, str] | None = None,
-) -> discord.Embed:
+) -> list[discord.Embed]:
     """The admin action trail: who did what, when, and why.
 
     Exists because everything else in the bot writes to this log and nothing
@@ -419,17 +424,25 @@ def audit_embed(
     ``links`` maps a target to the proof post it refers to. Plenty of entries
     have nowhere to jump — a config change, a purge, a score whose photo never
     posted — and those simply read as they did before.
+
+    Returns as many embeds as the entries need. It used to return one and slice
+    the description at 4000 characters, which silently dropped over half of a
+    40-entry request and cut the last line mid-word while the footer still
+    claimed to be showing all of them. Jump links made each line ~100
+    characters longer and turned that from a corner case into the common one.
     """
     if not entries:
-        return discord.Embed(
-            title="Audit log",
-            description=(
-                cleared_note
-                or "Nothing recorded yet. Admin actions — voids, purges, "
-                "config and tournament changes — show up here."
-            ),
-            color=GREY,
-        )
+        return [
+            discord.Embed(
+                title="Audit log",
+                description=(
+                    cleared_note
+                    or "Nothing recorded yet. Admin actions — voids, purges, "
+                    "config and tournament changes — show up here."
+                ),
+                color=GREY,
+            )
+        ]
 
     lines = []
     for entry in entries:
@@ -443,14 +456,33 @@ def audit_embed(
             line += f"\n　　{entry.detail}"
         lines.append(line)
 
-    embed = discord.Embed(
-        title="Audit log",
-        description="\n".join(lines)[:4000],
-        color=BLURPLE,
-    )
+    pages: list[list[str]] = []
+    page: list[str] = []
+    used = 0
+    for line in lines:
+        # A single pathological line still gets a page rather than being
+        # dropped; the truncation below keeps it inside Discord's hard cap.
+        if page and used + len(line) + 1 > MAX_DESCRIPTION_CHARS:
+            pages.append(page)
+            page, used = [], 0
+        page.append(line)
+        used += len(line) + 1
+    if page:
+        pages.append(page)
+
+    built = []
+    for index, body in enumerate(pages):
+        embed = discord.Embed(
+            title="Audit log" if index == 0 else f"Audit log (cont. {index + 1})",
+            description="\n".join(body)[:MAX_DESCRIPTION_CHARS],
+            color=BLURPLE,
+        )
+        built.append(embed)
+
     suffix = f" of {total}" if total > len(entries) else ""
-    embed.set_footer(text=f"showing {len(entries)}{suffix} entr(ies), newest first")
-    return embed
+    tail = ", newest first" if len(built) == 1 else f", newest first · {len(built)} pages"
+    built[-1].set_footer(text=f"showing {len(entries)}{suffix} entr(ies){tail}")
+    return built
 
 
 def history_embed(

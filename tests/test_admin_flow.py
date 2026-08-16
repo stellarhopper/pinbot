@@ -1197,3 +1197,50 @@ async def test_the_links_are_one_query_however_long_the_log(tmp_path, monkeypatc
     assert calls["n"] == 1
     assert isinstance(ids, list)
     h.close()
+
+
+async def test_audit_show_spans_messages_rather_than_truncating(tmp_path, monkeypatch):
+    """A long log used to render as one embed sliced at 4000 characters, which
+    dropped over half a 40-entry request while the footer claimed otherwise."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    # Enough to overflow both a single embed and a single message. Built
+    # directly rather than through /new so the volume stays cheap.
+    for n in range(40):
+        sub, _, _ = h.store.add_submission(
+            guild_id=GUILD, tournament_id=h.tournament.id,
+            table_id=h.table_id("Godzilla"), user_id=ALICE,
+            user_display="alice", score=1_000_000 + n,
+        )
+        h.store.attach_proof(
+            GUILD, sub.id, channel_id=900, message_id=7000 + n,
+            jump_url=(
+                "https://discord.com/channels/1420254013458223158/"
+                f"1536971356942372954/{1536999999999999000 + n}"
+            ),
+            filename="proof.jpg",
+        )
+        h.store.log(GUILD, actor_id=99, action="review.drop",
+                    target=f"submission:{sub.id}",
+                    detail="mismatch: read 3127605730, claimed 12335465367")
+
+    itx = await h.run(h.admin.audit_show, FakeInteraction(), limit=40)
+
+    messages = [es for _k, _c, _e, es in itx.record if es]
+    assert len(messages) > 1, "40 linked entries cannot fit in one message"
+    pages = [e for es in messages for e in es]
+    shown = sum(p.description.count("submission:") for p in pages)
+    assert shown == 40, f"every audited submission appears, got {shown}"
+    assert all(len(p.description) <= embeds.MAX_DESCRIPTION_CHARS for p in pages)
+    h.close()
+
+
+async def test_audit_show_still_works_for_a_short_log(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.run(h.admin.tournament_end, FakeInteraction())
+
+    itx = await h.run(h.admin.audit_show, FakeInteraction())
+
+    pages = [e for _k, _c, _e, es in itx.record if es for e in es]
+    assert len(pages) == 1, "no needless pagination"
+    assert "tournament.end" in pages[0].description
+    h.close()

@@ -319,9 +319,16 @@ class FakeInteraction:
 
     @property
     def embed(self) -> discord.Embed:
-        for _kind, _content, embed, _embeds in reversed(self.record):
+        """The last embed sent, however it was passed.
+
+        A command that grew from one embed to a paginated list shouldn't break
+        every test that only cares what the first page says.
+        """
+        for _kind, _content, embed, embeds in reversed(self.record):
             if embed is not None:
                 return embed
+            if embeds:
+                return embeds[0]
         raise AssertionError(f"no embed in {self.record}")
 
     @property

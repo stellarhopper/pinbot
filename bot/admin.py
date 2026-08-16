@@ -882,16 +882,21 @@ class AdminCog(commands.Cog):
             return
         assert interaction.guild_id is not None
         guild_id = interaction.guild_id
+        # Deferred because a long log spans several messages, and only a
+        # deferred interaction can send more than one.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         entries = self.store.audit_entries(guild_id, limit=max(1, min(limit, 40)))
-        await interaction.response.send_message(
-            embed=embeds.audit_embed(
-                entries,
-                self.store.audit_count(guild_id),
-                links=self._audit_links(guild_id, entries),
-            ),
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
+        built = embeds.audit_embeds(
+            entries,
+            self.store.audit_count(guild_id),
+            links=self._audit_links(guild_id, entries),
         )
+        for page in embeds.chunk_embeds(built):
+            await interaction.followup.send(
+                embeds=page,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
 
     def _audit_links(self, guild_id: int, entries: list) -> dict[str, str]:
         """Jump URLs for the audit entries that point at a proof post."""

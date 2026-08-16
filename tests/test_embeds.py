@@ -459,3 +459,85 @@ def test_an_oversized_embed_gets_a_message_to_itself():
 
 def test_no_embeds_means_no_messages():
     assert embeds.chunk_embeds([]) == []
+
+
+# ------------------------------------------------------- audit log paging
+
+def _audit(n: int, *, detail: str = "mismatch: read 3127605730, claimed 12335465367"):
+    from bot.store import AuditEntry
+    return [
+        AuditEntry(id=i, guild_id=500, at=now(), actor_id=197105676512788491,
+                   action="review.drop", target=f"submission:{i}", detail=detail)
+        for i in range(1, n + 1)
+    ]
+
+
+def _links(n: int):
+    return {
+        f"submission:{i}": (
+            f"https://discord.com/channels/1420254013458223158/"
+            f"1536971356942372954/{1536999999999999000 + i}"
+        )
+        for i in range(1, n + 1)
+    }
+
+
+def test_a_short_log_is_still_a_single_embed():
+    built = embeds.audit_embeds(_audit(5), 5, links=_links(5))
+    assert len(built) == 1
+    assert "5" in built[0].footer.text
+
+
+def test_a_long_log_pages_instead_of_being_cut_off():
+    """It used to slice the description at 4000 characters: a 40-entry request
+    rendered 18 and cut the last one mid-word, with a footer claiming 40."""
+    entries = _audit(40)
+    built = embeds.audit_embeds(entries, 40, links=_links(40))
+
+    assert len(built) > 1, "40 entries do not fit in one embed"
+    shown = sum(page.description.count("submission:") for page in built)
+    assert shown == 40, "every entry survives"
+    for page in built:
+        assert len(page.description) <= embeds.MAX_DESCRIPTION_CHARS
+
+
+def test_paging_loses_not_one_character():
+    """The pages joined back together must be exactly what one giant embed
+    would have said — no entry split across a boundary, nothing trimmed."""
+    entries = _audit(40)
+    links = _links(40)
+    built = embeds.audit_embeds(entries, 40, links=links)
+    rejoined = "\n".join(p.description for p in built)
+
+    single = embeds.audit_embeds(entries[:1], 1, links=links)[0].description
+    assert single in rejoined, "the first entry renders identically either way"
+    for i in range(1, 41):
+        assert f"submission:{i}`" in rejoined
+        assert links[f"submission:{i}"] in rejoined, "every jump link is intact"
+
+
+def test_the_footer_counts_what_was_actually_shown():
+    built = embeds.audit_embeds(_audit(40), 900, links=_links(40))
+    footer = built[-1].footer.text
+    assert "40 of 900" in footer
+    assert "pages" in footer, "and says it spans several"
+    assert all(p.footer.text is None for p in built[:-1]), "one footer, on the last page"
+
+
+def test_paged_audit_still_fits_discords_message_limits():
+    """audit_embeds pages, chunk_embeds then packs those into messages."""
+    built = embeds.audit_embeds(_audit(40), 40, links=_links(40))
+    for message in embeds.chunk_embeds(built):
+        assert len(message) <= embeds.MAX_EMBEDS_PER_MESSAGE
+        assert sum(len(e) for e in message) <= embeds.MAX_EMBED_CHARS_PER_MESSAGE
+
+
+def test_an_empty_log_is_one_embed_that_explains_itself():
+    built = embeds.audit_embeds([], 0)
+    assert len(built) == 1
+    assert "Nothing recorded yet" in built[0].description
+
+
+def test_a_cleared_log_keeps_its_note():
+    built = embeds.audit_embeds([], 0, cleared_note="Wiped 12 entries.")
+    assert built[0].description == "Wiped 12 entries."
