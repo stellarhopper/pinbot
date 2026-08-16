@@ -444,6 +444,33 @@ class AdminCog(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
+    # ---------------------------------------------------------------- /flagged
+
+    @app_commands.command(
+        name="flagged",
+        description="Admin: scores the photo check flagged and nobody has judged yet.",
+    )
+    @app_commands.guild_only()
+    async def flagged(self, interaction: discord.Interaction) -> None:
+        if not await require_admin(self.store, interaction):
+            return
+        assert interaction.guild_id is not None
+        guild_id = interaction.guild_id
+
+        tournament = self.store.latest_tournament(guild_id)
+        if tournament is None:
+            await interaction.response.send_message(
+                "No tournament has run here yet.", ephemeral=True
+            )
+            return
+        pending = self.store.pending_flags(guild_id, tournament.id)
+        names = {t.id: t.name for t in self.store.list_tables(guild_id, include_inactive=True)}
+        await interaction.response.send_message(
+            embed=embeds.flagged_embed(pending, names),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
     # ------------------------------------------------------------------ /table
 
     table_group = app_commands.Group(
@@ -801,9 +828,27 @@ class AdminCog(commands.Cog):
         else:
             state = f"**{tournament.label}** ended {embeds.ts(tournament.ended_at, 'R')}"
         embed.add_field(name="Tournament", value=state, inline=False)
+        from .vision import is_available
+
+        if not self.store.get_vision_enabled(guild_id):
+            check = "off — `/config vision on`"
+        elif not is_available():
+            # Enabled in the database but dead on this host. Silently doing
+            # nothing is exactly how this gets discovered after an event.
+            check = (
+                "**on, but not running here** — this host has no `anthropic` "
+                "package or `ANTHROPIC_API_KEY`"
+            )
+        else:
+            pending = len(self.store.pending_flags(guild_id, tournament.id)) if tournament else 0
+            check = "on"
+            if pending:
+                check += f" — **{pending}** waiting for review (`/flagged`)"
+        embed.add_field(name="Photo cross-check", value=check, inline=False)
         embed.add_field(
-            name="Photo cross-check",
-            value="on" if self.store.get_vision_enabled(guild_id) else "off",
+            name="Flag pings",
+            value=", ".join(f"<@&{r}>" for r in roles)
+            or "_no admin role set — flags will mention the player only_",
             inline=False,
         )
         await interaction.response.send_message(

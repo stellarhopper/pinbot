@@ -11,7 +11,9 @@ from __future__ import annotations
 import types
 
 import bot.admin as admin_module
-from bot import channels
+import bot.vision as vision_module
+from bot import channels, review
+from bot.vision import VisionResult
 from bot.store import now
 
 from fakes import (
@@ -348,7 +350,8 @@ async def test_config_show_renders_on_a_bare_server(tmp_path, monkeypatch):
     assert "/config pinball-channel" in fields["Pinball channel"]
     assert "/table add" in fields["Tables"]
     assert "/tournament start" in fields["Tournament"]
-    assert fields["Photo cross-check"] == "off"
+    assert fields["Photo cross-check"].startswith("off")
+    assert "player only" in fields["Flag pings"], "no admin role means nobody to ping"
     h.close()
 
 
@@ -1019,4 +1022,94 @@ async def test_autocomplete_tells_a_non_admin_nothing(tmp_path, monkeypatch):
     assert await h.admin.drop_autocomplete(itx, "") == []
     assert await h.admin.restore_autocomplete(itx, "") == []
     assert await h.admin.table_autocomplete(itx, "") == []
+    h.close()
+
+
+# ----------------------------------------------------------------- /flagged
+
+async def test_flagged_is_empty_until_something_is_flagged(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "1,000,000")
+
+    itx = await h.run(h.admin.flagged, FakeInteraction())
+
+    assert "Nothing waiting" in itx.embed.description
+    h.close()
+
+
+async def test_flagged_lists_the_queue_with_what_the_photo_read(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "5,000,000")
+    proof = h.channel.sent[-1]
+    submission = h.store.get_submission_by_proof_message(GUILD, proof.id)
+    await h.flag(submission, VisionResult("mismatch", score=1_200_000))
+
+    itx = await h.run(h.admin.flagged, FakeInteraction())
+
+    body = itx.embed.description
+    assert f"#{submission.id}" in body
+    assert "5,000,000" in body, "what the player claimed"
+    assert "1,200,000" in body, "what the photo read"
+    assert "Godzilla" in body
+    assert "1 waiting" in itx.embed.title
+    h.close()
+
+
+async def test_flagged_says_when_a_photo_was_unreadable(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "5,000,000")
+    proof = h.channel.sent[-1]
+    submission = h.store.get_submission_by_proof_message(GUILD, proof.id)
+    await h.flag(submission, VisionResult("illegible"))
+
+    itx = await h.run(h.admin.flagged, FakeInteraction())
+
+    assert "unreadable" in itx.embed.description
+    h.close()
+
+
+async def test_flagged_empties_once_reviewed(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    await h.submit("Godzilla", "5,000,000")
+    proof = h.channel.sent[-1]
+    submission = h.store.get_submission_by_proof_message(GUILD, proof.id)
+    await h.flag(submission, VisionResult("mismatch", score=1_200_000))
+
+    await h.react(proof.id, review.APPROVE, user_id=99)
+
+    itx = await h.run(h.admin.flagged, FakeInteraction())
+    assert "Nothing waiting" in itx.embed.description
+    h.close()
+
+
+async def test_config_show_admits_when_the_check_cannot_run_here(tmp_path, monkeypatch):
+    """Enabled in the database but dead on the host is the failure mode that
+    gets discovered *after* an event. /config show has to say so."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    h.store.set_vision_enabled(GUILD, True)
+    monkeypatch.setattr(vision_module, "is_available", lambda: False)
+
+    itx = await h.run(h.admin.config_show, FakeInteraction())
+    fields = {f.name.split(" (")[0]: f.value for f in itx.embed.fields}
+
+    assert "not running here" in fields["Photo cross-check"]
+    assert "ANTHROPIC_API_KEY" in fields["Photo cross-check"]
+    h.close()
+
+
+async def test_config_show_counts_what_is_waiting(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    h.store.set_vision_enabled(GUILD, True)
+    monkeypatch.setattr(vision_module, "is_available", lambda: True)
+    await h.submit("Godzilla", "5,000,000")
+    proof = h.channel.sent[-1]
+    await h.flag(
+        h.store.get_submission_by_proof_message(GUILD, proof.id),
+        VisionResult("mismatch", score=1_200_000),
+    )
+
+    itx = await h.run(h.admin.config_show, FakeInteraction())
+    fields = {f.name.split(" (")[0]: f.value for f in itx.embed.fields}
+
+    assert "1** waiting" in fields["Photo cross-check"]
     h.close()

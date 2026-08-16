@@ -75,7 +75,7 @@ log "installing dependencies"
 if ! "$VENV/bin/pip" install --quiet --upgrade pip >>"$LOG_FILE" 2>&1; then
     log "warning: could not upgrade pip, continuing"
 fi
-if ! "$VENV/bin/pip" install --quiet -e ".[dev]" >>"$LOG_FILE" 2>&1; then
+if ! "$VENV/bin/pip" install --quiet -e ".[dev,vision]" >>"$LOG_FILE" 2>&1; then
     rollback
     fail "dependency install failed (see $LOG_FILE)"
 fi

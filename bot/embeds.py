@@ -389,6 +389,51 @@ def history_embed(
     return embed
 
 
+def flagged_embed(
+    submissions: list[Submission], table_names: dict[int, str]
+) -> discord.Embed:
+    """The photo-review queue: what the check flagged and nobody has judged yet.
+
+    Each line carries a jump link, because the review itself happens by
+    reacting on the proof post rather than in here.
+    """
+    if not submissions:
+        return discord.Embed(
+            title="Photo review",
+            description=(
+                "Nothing waiting. Scores get flagged here when the photo doesn't "
+                "match what was reported, or when it can't be read at all."
+            ),
+            color=GREY,
+        )
+
+    lines: list[str] = []
+    for sub in submissions:
+        table = table_names.get(sub.table_id, "an unknown table")
+        if sub.vision_verdict == "illegible":
+            finding = "photo unreadable"
+        elif sub.vision_score is not None:
+            finding = f"photo reads {format_score(sub.vision_score)}"
+        else:
+            finding = "needs a look"
+        link = _proof_link(sub)
+        suffix = f" · {link}" if link else " · _no proof post_"
+        lines.append(
+            f"{BULLET} `#{sub.id}` **{format_score(sub.score)}** on {table} — "
+            f"<@{sub.user_id}> · {finding} · {ts(sub.flagged_at, 'R')}{suffix}"
+        )
+
+    embed = discord.Embed(
+        title=f"Photo review ({len(submissions)} waiting)",
+        description="\n".join(lines)[:4000],
+        color=BLURPLE,
+    )
+    embed.set_footer(
+        text="React ✅ or ❌ on the proof photo to keep or drop it, or use /drop"
+    )
+    return embed
+
+
 # -------------------------------------------------------------- void/restore
 
 def void_embed(

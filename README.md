@@ -22,7 +22,8 @@ needs editing on disk beyond the bot token.
 | `/table add\|remove\|rename\|list` | admin | Manage the machines in play. |
 | `/config pinball-channel [channel]` | admin | Where scores and photos are posted, and the only channel the bot answers in. Set automatically by the first setup command you run; defaults to the current channel. |
 | `/config admin-role add\|remove\|list` | admin | Roles that may run admin commands. |
-| `/config vision <on\|off>` | admin | Photo/score cross-check (see Phase 2). |
+| `/config vision <on\|off>` | admin | Photo/score cross-check (see below). |
+| `/flagged` | admin | Scores the photo check flagged and nobody has judged yet. |
 | `/config show` | admin | Everything configured for this server. |
 | `/drop <id> [reason]` | admin | Void a score; the crown reverts. Autocompletes with standing kings first. |
 | `/restore <id>` | admin | Un-void. Autocompletes with the most recent void first. |
@@ -68,12 +69,20 @@ Scores are entered as text, so `12,345,678` and `12 345 678` both work.
 3. Invite it. Take the **Application ID** from the **General Information** tab and open:
 
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&permissions=117760&scope=bot+applications.commands
+   https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&permissions=117824&scope=bot+applications.commands
    ```
 
-   `117760` is exactly **View Channel + Send Messages + Embed Links + Attach Files +
-   Read Message History** — nothing more. (You can build the same thing by hand under
-   **OAuth2 → URL Generator**, but the number saves the box-ticking.)
+   `117824` is exactly **View Channel + Send Messages + Embed Links + Attach Files +
+   Read Message History + Add Reactions** — nothing more. (You can build the same thing by
+   hand under **OAuth2 → URL Generator**, but the number saves the box-ticking. To make it
+   stick for future servers, set the same list under **Installation → Default Install
+   Settings**.)
+
+   **Upgrading from an older invite?** `117760` predates the photo check and lacks **Add
+   Reactions**, so flagged scores can't be reviewed by reacting. Permissions are not
+   retroactive: either open the new invite URL again, or tick it by hand under
+   *Server Settings → Roles → your bot*. `python -m bot.checkup` reports the gap per
+   channel.
 
 **`Read Message History` is not optional, and its absence is easy to misread.** `/hs`
 re-reads the bot's own proof messages to get a fresh image URL (see *Why no photos on disk*
@@ -238,23 +247,47 @@ exactly where it would otherwise bite you mid-tournament.
 Note that `/drophs` and `/droptables` delete scores from the database but do **not** delete
 message history. The proof photos stay in the channel.
 
-## Phase 2 (opt-in): photo/score cross-check
+## Opt-in: photo/score cross-check
 
-`bot/vision.py` can read the score off a submitted photo with a vision model and compare it
-to what the player typed, flagging mismatches for admin review. It is **off by default** and
-not yet wired into the submission path, for two reasons: dot-matrix and segment displays are
-genuinely hard to read, so the false-positive rate is unknown until it's tried on real photos
-from your event; and an API call in the submission path is a new failure mode you want to be
-able to switch off from your phone mid-tournament.
+The bot can read the score off each submitted photo with a vision model and compare it to
+what the player typed. It's **off by default** — an API call in the submission path is a new
+failure mode you want to be able to switch off from your phone mid-tournament.
 
-By design it never rejects and never fails a submission — a mismatch flags for review, and
-any error records "unavailable". To try it:
+**What it's for.** Catching *honest mistakes early* — a fat-fingered digit, a photo of the
+wrong machine, a score typed while the ball was still in play — while the player is still
+standing at the machine. It is not an integrity backstop; reconcile against the machines'
+own high-score tables at the end of the event for that.
+
+**Two invariants.** It never rejects a submission, and it never fails one. The score is on
+the ledger and confirmed before the check runs; every error path records "unavailable" and
+says nothing.
+
+**What gets flagged**, when the read doesn't match the claim, or the photo can't be read at
+all. An unreadable photo isn't proof, so it gets an explicit human sign-off rather than a
+silent pass. The bot also reports which machine it thinks is in the photo, but never flags
+on that alone — backglass art is often out of frame.
+
+**How a flag is reviewed.** The bot replies to the proof photo, publicly, mentioning the
+player and the admin roles, and puts ✅ and ❌ on the photo. An admin reacting ✅ lets the
+score stand; ❌ voids it through the ordinary drop path, so the crown reverts and the usual
+announcement fires. Every decision is audited. `/flagged` lists anything still waiting.
+
+Only a score the check actually flagged can be dropped this way, and only by an admin — a
+stray ❌ on an ordinary proof post does nothing.
+
+Expect a fair number of flags, and keep that in mind when reading them: every submission is
+checked and glare on a DMD is common, so a flag means "worth a look", not "cheat".
 
 ```sh
-.venv/bin/pip install -e '.[vision]'
+.venv/bin/pip install -e '.[vision]'   # the Pi deployment installs this already
 # add ANTHROPIC_API_KEY to .env, restart, then:
 /config vision on
 ```
+
+Roughly 3¢ per check, so about $6 over a 200-submission weekend. Use a workspace-scoped API
+key with a spend limit. `/config show` tells you if the check is switched on but can't
+actually run on this host — a key without the package, or the reverse, otherwise fails
+silently.
 
 ## Development
 
@@ -263,13 +296,15 @@ any error records "unavailable". To try it:
 .venv/bin/python -m pytest
 ```
 
-155 tests, no Discord connection needed, under a second. Two tiers:
+353 tests, no Discord connection needed, under a second. Two tiers:
 
-**Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`.
-The ledger (crown, voiding, reverting, tie-breaks), tournament windows, purges, input
-parsing, admin access, and cross-server isolation.
+**Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
+`test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,
+purges, input parsing, admin access, and cross-server isolation. `test_vision.py` injects a
+fake `anthropic` into `sys.modules`, so the photo check is covered with no dependency, no
+network, and no API key.
 
-**Integration tests** — `test_submit_flow.py`, `test_admin_flow.py`. These call the real
+**Integration tests** — `test_submit_flow.py`, `test_admin_flow.py`, `test_review_flow.py`. These call the real
 command callbacks against fake Discord objects (`tests/fakes.py`), so they cover the seam
 between the ledger and Discord: what actually gets announced, how proof photos are stored
 and re-resolved, the destructive-purge gate, and the auto-close loop. Both bugs found on
@@ -280,8 +315,9 @@ drives `/new` end to end.
 `tests/conftest.py` holds an eight-line hook so tests can be written as `async def`, rather
 than taking on pytest-asyncio as a dependency.
 
-Both tiers are mutation-checked: reintroducing the decimal-stripping bug fails 9 tests, and
-making `/new` always announce a new king fails 2.
+Both tiers are mutation-checked: reintroducing the decimal-stripping bug fails 9 tests,
+making `/new` always announce a new king fails 2, and removing either the admin check or the
+bot's-own-reaction guard from the photo review fails 1 each.
 
 ### Layout
 
@@ -298,7 +334,8 @@ making `/new` always announce a new king fails 2.
 | `bot/channels.py` | Where commands may be run, and the one command exempt from it. |
 | `bot/scoring.py`, `bot/durations.py` | Input parsing. |
 | `bot/checkup.py` | `python -m bot.checkup` — verify the Discord setup. |
-| `bot/vision.py` | Phase 2 photo check (optional). |
+| `bot/vision.py` | The photo check itself: reads a score off an image (optional). |
+| `bot/review.py` | Flagging a doubtful photo, and the ✅/❌ review that resolves it. |
 | `tests/fakes.py` | Fake Discord objects + the `Harness` the integration tests drive. |
 
 The central design decision is in `store.py`: submissions are **append-only** and voiding a

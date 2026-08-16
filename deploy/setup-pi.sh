@@ -59,7 +59,7 @@ if [ ! -x "$DEPLOY_DIR/.venv/bin/python" ]; then
     python3 -m venv "$DEPLOY_DIR/.venv"
 fi
 "$DEPLOY_DIR/.venv/bin/pip" install --quiet --upgrade pip
-"$DEPLOY_DIR/.venv/bin/pip" install --quiet -e "$DEPLOY_DIR[dev]"
+"$DEPLOY_DIR/.venv/bin/pip" install --quiet -e "$DEPLOY_DIR[dev,vision]"
 ok "installed into $DEPLOY_DIR/.venv"
 
 # --- 5. secrets ------------------------------------------------------------
