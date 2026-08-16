@@ -29,6 +29,12 @@ fail() {
     exit 1
 }
 
+# Fingerprint of this script as it was before the checkout moves under it.
+script_hash() {
+    sha256sum "$DEPLOY_DIR/deploy/deploy.sh" 2>/dev/null | cut -d' ' -f1
+}
+SELF_HASH="$(script_hash)"
+
 log "=== deployment starting ==="
 
 # --- fetch -----------------------------------------------------------------
@@ -50,6 +56,29 @@ fi
 cd "$DEPLOY_DIR"
 CURRENT="$(git rev-parse HEAD)"
 log "now at ${CURRENT:0:12} — $(git log -1 --pretty=%s)"
+
+# --- run the *new* deploy script, not this one -----------------------------
+#
+# This script lives in the checkout it just replaced. Bash reads a script as it
+# goes and buffers it, so everything below is whatever was on disk when this
+# process started — the *previous* commit's version. A change to this file
+# would therefore take effect one deploy late, and silently: the deploy reports
+# success while having run the old steps. That is exactly how a corrected
+# install line can look deployed and still do nothing.
+#
+# So if this commit changed the script, hand over to the version that came with
+# it. PINBOT_REEXEC stops that handover happening twice, and PINBOT_PREVIOUS
+# carries the commit that was actually running, so rollback still points at it
+# after the re-exec has made HEAD look unchanged.
+if [ -z "${PINBOT_REEXEC:-}" ] && [ "$SELF_HASH" != "$(script_hash)" ]; then
+    log "deploy.sh changed in this commit — re-running the new one"
+    export PINBOT_REEXEC=1 PINBOT_PREVIOUS="$PREVIOUS"
+    exec bash "$DEPLOY_DIR/deploy/deploy.sh" "$@"
+fi
+
+if [ -n "${PINBOT_PREVIOUS:-}" ]; then
+    PREVIOUS="$PINBOT_PREVIOUS"   # the re-run's own fetch was a no-op
+fi
 
 if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" = "$CURRENT" ]; then
     log "already up to date; reinstalling and restarting anyway"

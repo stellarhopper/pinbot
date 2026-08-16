@@ -48,15 +48,31 @@ per push.
 
 1. `git fetch` + `git reset --hard origin/main` — the Pi mirrors `main`, it isn't
    somewhere you edit.
-2. `pip install -e ".[dev]"` into `.venv`.
-3. **Runs the test suite.**
-4. Only then `sudo systemctl restart pinbot`, and waits five seconds to confirm
+2. If that commit changed `deploy.sh` itself, **re-exec into the new copy** (see
+   below).
+3. `pip install -e ".[dev,vision]"` into `.venv`.
+4. **Runs the test suite.**
+5. Only then `sudo systemctl restart pinbot`, and waits five seconds to confirm
    the process is still alive before declaring success.
 
-**If step 2 or 3 fails, the checkout is rolled back to the commit that was
+**If step 3 or 4 fails, the checkout is rolled back to the commit that was
 running and the bot is not restarted.** A tournament is live for a whole weekend;
 a bad push at the wrong moment costs real scores, so the running process is left
 alone unless the new code passes.
+
+### Why step 2 exists
+
+`deploy.sh` lives inside the checkout it replaces. Bash reads a script as it runs
+and buffers it, so without the re-exec every line after the `git reset` is the
+*previous* commit's version — meaning a change to this script takes effect one
+deploy late, and silently: the run reports success while having done the old
+thing. That is not hypothetical. It is how the fix that added `[vision]` to the
+install line was deployed, logged as successful, and left `anthropic` uninstalled.
+
+The handover compares a hash of the script taken before the reset with one taken
+after, and passes `PINBOT_PREVIOUS` through the `exec` — the second pass's own
+fetch is a no-op, so without it the rollback target would be the commit being
+deployed rather than the one that was running, and rolling back would do nothing.
 
 ## Where things live
 
