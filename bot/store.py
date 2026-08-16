@@ -130,8 +130,10 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 # Setting keys, so typos surface here rather than as a silently missing value.
 CHANNEL_KEY = "pinball_channel_id"
 ADMIN_ROLES_KEY = "admin_role_ids"
+# Who gets pinged about a flagged photo is deliberately *not* a setting: it is
+# whoever /config admin-role names, since that is the same group who can act on
+# it. A second knob for the same audience is a second thing to get wrong.
 VISION_KEY = "vision_enabled"
-VISION_PING_KEY = "vision_ping_role_id"
 
 # `meta` key, not a guild setting — see Store.dev_synced_guilds.
 DEV_SYNC_KEY = "dev_synced_guilds"
@@ -462,16 +464,6 @@ class Store:
             "SELECT COUNT(*) AS n FROM settings WHERE guild_id = ?", (guild_id,)
         ).fetchone()
         return row["n"]
-
-    def get_vision_ping_role_id(self, guild_id: int) -> int | None:
-        raw = self.get_setting(guild_id, VISION_PING_KEY)
-        return int(raw) if raw else None
-
-    def set_vision_ping_role_id(self, guild_id: int, role_id: int | None) -> None:
-        if role_id is None:
-            self.delete_setting(guild_id, VISION_PING_KEY)
-        else:
-            self.set_setting(guild_id, VISION_PING_KEY, str(role_id))
 
     # ------------------------------------------------------------------ tables
 

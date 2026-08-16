@@ -11,6 +11,7 @@ from discord.ext import commands
 from .admin import setup_admin
 from .config import Config, load_env_file
 from .proofs import ProofURLCache
+from .review import setup_review
 from .scores import setup_scores
 from .store import Store
 from .tree import PinballTree
@@ -76,7 +77,10 @@ class PinballBot(commands.Bot):
         self.urls = ProofURLCache()
 
     async def setup_hook(self) -> None:
-        await setup_scores(self, self.store, self.urls)
+        scores = await setup_scores(self, self.store, self.urls)
+        # The photo check hands its verdict to the review cog, which owns both
+        # the public flag and the ✅/❌ that resolves it.
+        scores.review = await setup_review(self, self.store)
         await setup_admin(self, self.store, self.urls)
         await self.sync_commands()
 

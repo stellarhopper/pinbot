@@ -93,6 +93,24 @@ def as_file(data: bytes, filename: str) -> discord.File:
     return discord.File(io.BytesIO(data), filename=filename)
 
 
+# What the vision API will accept. Deliberately narrower than what /new accepts:
+# a phone can upload HEIC/HEIF straight from the camera roll, and that is a
+# perfectly good proof photo that simply cannot be sent for a machine read.
+_VISION_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+
+
+def vision_media_type(attachment: discord.Attachment) -> str | None:
+    """The media type to send to the vision API, or None if it can't be read.
+
+    None means "skip the check", never "reject the photo" — the score is
+    already on the ledger by the time anything asks this.
+    """
+    content_type = (attachment.content_type or "").split(";")[0].strip().lower()
+    if content_type == "image/jpg":
+        content_type = "image/jpeg"
+    return content_type if content_type in _VISION_MEDIA_TYPES else None
+
+
 def _image_url(message: discord.Message) -> str | None:
     """Find the proof photo on one of the bot's own messages.
 

@@ -9,8 +9,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from . import embeds, proofs
+from . import embeds, proofs, vision
 from .avatars import AvatarCache
+from .review import ReviewCog
 from .scoring import ScoreFormatError, format_score, parse_score
 from .store import Store, Submission, Table, Tournament
 
@@ -30,6 +31,18 @@ class ScoresCog(commands.Cog):
         self._upload_slots = asyncio.Semaphore(2)
         # Fills in faces for scores recorded before the avatar was snapshotted.
         self.avatars = AvatarCache()
+        # The photo check runs after the player has already been told their
+        # score is in, so it gets its own budget: one at a time, because a Pi
+        # should not be holding a second 10 MB photo while an upload is in
+        # flight. asyncio keeps only weak references to tasks, so a task that
+        # isn't held here can be garbage-collected mid-flight.
+        self._vision_slots = asyncio.Semaphore(1)
+        self._vision_tasks: set[asyncio.Task] = set()
+        self.review: ReviewCog | None = None
+
+    async def cog_unload(self) -> None:
+        for task in list(self._vision_tasks):
+            task.cancel()
 
     # ----------------------------------------------------------- autocomplete
 
@@ -149,6 +162,18 @@ class ScoresCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
+            else:
+                # Hand the bytes to the check before the `del` below drops our
+                # name for them — the task then holds the only reference, for
+                # the few seconds the call takes. This is the one place the
+                # memory guard is deliberately relaxed.
+                self._spawn_photo_check(
+                    guild_id=guild_id,
+                    submission=submission,
+                    machine=machine,
+                    data=data,
+                    media_type=proofs.vision_media_type(proof),
+                )
             finally:
                 del data  # release the image bytes promptly
 
@@ -171,6 +196,69 @@ class ScoresCog(commands.Cog):
                 f"`#{submission.id}`. {standing}",
                 ephemeral=True,
             )
+
+    # ------------------------------------------------------------ photo check
+
+    def _spawn_photo_check(
+        self,
+        *,
+        guild_id: int,
+        submission: Submission,
+        machine: Table,
+        data: bytes,
+        media_type: str | None,
+    ) -> None:
+        """Start the background cross-check, if it can run at all.
+
+        Every reason to skip is a silent one. The player has already been told
+        their score is in, and none of these are their problem: the feature is
+        off, the host has no key or package, the photo is a format the API
+        won't take, or the review cog isn't loaded.
+        """
+        if media_type is None or self.review is None:
+            return
+        if not self.store.get_vision_enabled(guild_id) or not vision.is_available():
+            return
+
+        task = asyncio.create_task(
+            self._check_photo(
+                guild_id=guild_id,
+                submission=submission,
+                machine=machine,
+                data=data,
+                media_type=media_type,
+            )
+        )
+        self._vision_tasks.add(task)
+        task.add_done_callback(self._vision_tasks.discard)
+
+    async def _check_photo(
+        self,
+        *,
+        guild_id: int,
+        submission: Submission,
+        machine: Table,
+        data: bytes,
+        media_type: str | None,
+    ) -> None:
+        try:
+            async with self._vision_slots:
+                result = await vision.check_score(data, media_type, submission.score)
+            if result.verdict == "unavailable":
+                # The bot's own failure. Already logged in vision.py, and it
+                # must never cost the player a flag.
+                return
+            assert self.review is not None
+            await self.review.flag(
+                guild_id=guild_id,
+                submission=submission,
+                table_name=machine.name,
+                result=result,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - the score is already recorded
+            log.exception("photo check failed for submission %s", submission.id)
 
     async def _record(
         self,

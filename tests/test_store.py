@@ -686,14 +686,6 @@ def test_pending_flags_lists_the_queue_oldest_first(fx):
     assert [s.id for s in fx.store.pending_flags(GUILD, fx.tournament.id)] == [first.id]
 
 
-def test_the_ping_role_round_trips_and_clears(store):
-    assert store.get_vision_ping_role_id(GUILD) is None
-    store.set_vision_ping_role_id(GUILD, 4242)
-    assert store.get_vision_ping_role_id(GUILD) == 4242
-    store.set_vision_ping_role_id(GUILD, None)
-    assert store.get_vision_ping_role_id(GUILD) is None
-
-
 # ------------------------------------------------------------- name validation
 
 @pytest.mark.parametrize("bad", ["", "   ", "\n\t ", "A" * 65])

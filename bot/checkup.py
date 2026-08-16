@@ -18,14 +18,17 @@ import discord
 from .config import Config, load_env_file
 from .store import Store
 
-# Exactly what the bot needs: post score announcements with photos, and re-read
-# its own proof messages to refresh expired image URLs.
+# Exactly what the bot needs: post score announcements with photos, re-read its
+# own proof messages to refresh expired image URLs, and put the review buttons
+# on a flagged photo. Both the invite URL and the per-channel audit below are
+# derived from this, so adding a permission here is the only edit needed.
 REQUIRED = discord.Permissions(
     view_channel=True,
     send_messages=True,
     embed_links=True,
     attach_files=True,
     read_message_history=True,
+    add_reactions=True,
 )
 
 OK = "\N{WHITE HEAVY CHECK MARK}"

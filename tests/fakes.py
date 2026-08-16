@@ -20,6 +20,7 @@ import bot.admin as admin_module
 import bot.perms as perms_module
 from bot.admin import AdminCog, setup_admin
 from bot.config import Config
+from bot.review import ReviewCog, setup_review
 from bot.scores import ScoresCog, setup_scores
 from bot.store import Store, Submission, Tournament
 from bot.__main__ import PinballBot
@@ -29,6 +30,8 @@ CHANNEL = 900
 BOT_USER = 4242
 
 ALICE, BOB, CARL = 1, 2, 3
+
+_UNSET = object()
 
 
 class FakeAttachment:
@@ -105,6 +108,13 @@ class FakeChannel(discord.abc.Messageable):
         self.name = "pinball"
         self.sent: list[FakeMessage] = []
         self.fetch_count = 0
+        # message_id -> {(emoji, user_id)}. Set reactions_forbidden to
+        # reproduce a server where the bot was never granted Add Reactions.
+        self.reactions: dict[int, set[tuple[str, int]]] = {}
+        self.reactions_forbidden = False
+
+    def get_partial_message(self, message_id: int) -> FakePartialMessage:
+        return FakePartialMessage(self, message_id)
 
     async def send(
         self, content=None, *, embed=None, embeds=None, file=None, allowed_mentions=None
@@ -129,6 +139,71 @@ class FakeChannel(discord.abc.Messageable):
     def last(self) -> FakeMessage:
         assert self.sent, "nothing was posted"
         return self.sent[-1]
+
+
+class FakePartialMessage:
+    """What `channel.get_partial_message(id)` hands back.
+
+    The review cog works through partial messages so it never has to fetch a
+    proof post it already knows the ID of. Reactions are recorded as a set of
+    (emoji, user_id) so a test can see both what the bot offered and what it
+    took back.
+    """
+
+    def __init__(self, channel: FakeChannel, message_id: int) -> None:
+        self.channel = channel
+        self.id = message_id
+
+    @property
+    def reactions(self) -> set[tuple[str, int]]:
+        return self.channel.reactions.setdefault(self.id, set())
+
+    async def add_reaction(self, emoji: str) -> None:
+        if self.channel.reactions_forbidden:
+            raise discord.Forbidden(
+                types.SimpleNamespace(status=403, reason="Forbidden"),
+                "missing add_reactions",
+            )
+        self.reactions.add((emoji, BOT_USER))
+
+    async def remove_reaction(self, emoji: str, user) -> None:
+        self.reactions.discard((emoji, getattr(user, "id", user)))
+
+    async def reply(self, content=None, *, embed=None, allowed_mentions=None):
+        message = FakeMessage(self.channel, content, embed, None, None, allowed_mentions)
+        message.reply_to = self.id
+        self.channel.sent.append(message)
+        return message
+
+
+class FakeMember:
+    """payload.member on a raw reaction — carries roles without the members intent."""
+
+    def __init__(self, user_id: int, *, manage_guild: bool = False, roles=()) -> None:
+        self.id = user_id
+        self.guild_permissions = types.SimpleNamespace(manage_guild=manage_guild)
+        self.roles = [types.SimpleNamespace(id=r) for r in roles]
+
+
+class FakeRawReaction:
+    """Shaped like discord.RawReactionActionEvent."""
+
+    def __init__(
+        self,
+        *,
+        message_id: int,
+        emoji: str,
+        user_id: int,
+        member: FakeMember | None = None,
+        guild_id: int | None = GUILD,
+        channel_id: int = CHANNEL,
+    ) -> None:
+        self.message_id = message_id
+        self.emoji = emoji
+        self.user_id = user_id
+        self.member = member
+        self.guild_id = guild_id
+        self.channel_id = channel_id
 
 
 class BrokenChannel(FakeChannel):
@@ -242,12 +317,14 @@ class Harness:
         scores: ScoresCog,
         admin: AdminCog,
         channel: FakeChannel,
+        review: ReviewCog,
     ) -> None:
         self.store = store
         self.bot = bot
         self.scores = scores
         self.admin = admin
         self.channel = channel
+        self.review = review
 
     @classmethod
     async def create(
@@ -264,6 +341,8 @@ class Harness:
         store = Store(tmp_path / "harness.db")
         bot = PinballBot(Config(), store)
         scores = await setup_scores(bot, store, bot.urls)
+        review = await setup_review(bot, store)
+        scores.review = review
         admin = await setup_admin(bot, store, bot.urls)
         # Nothing here wants the 30s auto-close ticking underneath it; the tests
         # that care invoke it directly.
@@ -309,9 +388,47 @@ class Harness:
             store.start_tournament(
                 GUILD, name="Spring Open", started_by=99, ends_at=ends_at
             )
-        harness = cls(store, bot, scores, admin, chan)
+        harness = cls(store, bot, scores, admin, chan, review)
         harness._gate = gate
         return harness
+
+    # -- the photo check ----------------------------------------------------
+
+    async def react(
+        self,
+        message_id: int,
+        emoji: str,
+        *,
+        user_id: int = 99,
+        member: FakeMember | None = _UNSET,
+        **kwargs,
+    ) -> None:
+        """Drive on_raw_reaction_add the way discord.py would.
+
+        Omitting `member` gets you a Manage Server admin, which is what most
+        tests want. Passing `member=None` explicitly is a different case — a
+        payload with nobody to authorize — so the two must not collapse.
+        """
+        if member is _UNSET:
+            member = None if user_id == BOT_USER else FakeMember(user_id, manage_guild=True)
+        await self.review.on_raw_reaction_add(
+            FakeRawReaction(
+                message_id=message_id,
+                emoji=emoji,
+                user_id=user_id,
+                member=member,
+                **kwargs,
+            )
+        )
+
+    async def flag(self, submission, result, table: str = "Godzilla") -> None:
+        """Flag a submission as the background check would have."""
+        await self.review.flag(
+            guild_id=GUILD, submission=submission, table_name=table, result=result
+        )
+
+    def reactions_on(self, message_id: int) -> set[str]:
+        return {e for e, _uid in self.channel.reactions.get(message_id, set())}
 
     def set_manage_guild(self, allowed: bool) -> None:
         """Simulate a caller with, or without, the Manage Server permission."""
