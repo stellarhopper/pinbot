@@ -244,10 +244,17 @@ class ScoresCog(commands.Cog):
         try:
             async with self._vision_slots:
                 result = await vision.check_score(data, media_type, submission.score)
-            if result.verdict == "unavailable":
-                # The bot's own failure. Already logged in vision.py, and it
-                # must never cost the player a flag.
-                return
+            log.info(
+                "photo check on submission %s: %s (read %s, claimed %s)",
+                submission.id,
+                result.verdict,
+                result.score,
+                submission.score,
+            )
+            # "unavailable" is reported too. It never flags — the bot's own
+            # failure must not cost the player anything — but it is recorded
+            # and shown, because a check that says nothing when it breaks is
+            # indistinguishable from one that ran and agreed.
             assert self.review is not None
             await self.review.flag(
                 guild_id=guild_id,

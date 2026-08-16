@@ -100,6 +100,23 @@ class VisionResult:
         return self.table_name.strip().casefold() != claimed.strip().casefold()
 
 
+def _why(exc: Exception) -> str:
+    """A short, safe reason for an admin to read. Never includes the key."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc)
+    if "credit balance" in text or "Plans & Billing" in text:
+        return "the Anthropic account is out of credit"
+    if status == 401 or "authentication" in text.lower():
+        return "the API key was rejected"
+    if status == 429:
+        return "rate limited"
+    if status == 400:
+        return "the API rejected the request"
+    if isinstance(exc, TimeoutError):
+        return "timed out"
+    return f"{type(exc).__name__}"
+
+
 def is_available() -> bool:
     """True when both the key and the package are present on this host."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -153,9 +170,14 @@ async def check_score(
         if not text:
             return VisionResult("unavailable", reasoning="empty response")
         payload = json.loads(text)
-    except Exception:  # noqa: BLE001 - a check must never break a submission
-        log.exception("vision check failed")
-        return VisionResult("unavailable", reasoning="check errored")
+    except Exception as exc:  # noqa: BLE001 - a check must never break a submission
+        reason = _why(exc)
+        # Billing and auth failures stay broken until a human acts, so they are
+        # worth naming rather than logging as one more transient error. The
+        # first live run of this check failed every time on an empty credit
+        # balance and looked exactly like a working check.
+        log.error("vision check failed: %s", reason, exc_info=True)
+        return VisionResult("unavailable", reasoning=reason)
 
     # A response that isn't the shape we asked for is our problem, not the
     # player's. Degrading it to "illegible" would be the worst failure mode

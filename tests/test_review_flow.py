@@ -296,3 +296,108 @@ async def test_pending_flags_is_the_queue_and_empties_on_review(tmp_path, monkey
     queue = hx.store.pending_flags(GUILD, hx.tournament.id)
     assert [s.id for s in queue] == [second.id]
     hx.close()
+
+
+# ------------------------------------------------------- the status line
+
+UNAVAILABLE = VisionResult("unavailable", reasoning="the Anthropic account is out of credit")
+
+
+async def test_a_clean_read_is_recorded_under_the_photo(tmp_path, monkeypatch):
+    """Silence on a match is what made a broken check indistinguishable from a
+    working one. The photo now carries the verdict either way."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    await hx.submit("Godzilla", "5,000,000", user_id=BOB, name="bob")
+    await hx.submit("Godzilla", "1,000,000")   # not the crown: a plain-text post
+    proof = hx.channel.sent[-1]
+    submission = hx.store.get_submission_by_proof_message(GUILD, proof.id)
+
+    await hx.flag(submission, VisionResult("match", score=1_000_000))
+
+    assert proof.edits == 1, "the proof post itself is annotated, not replied to"
+    assert "Photo check" in proof.content
+    assert "matches" in proof.content
+    assert "1,000,000" in proof.content
+    hx.close()
+
+
+async def test_an_outage_says_so_instead_of_saying_nothing(tmp_path, monkeypatch):
+    """The first live run failed every check on an empty credit balance and
+    looked exactly like a working one. It must never be silent again."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    await hx.submit("Godzilla", "5,000,000")
+    proof = hx.channel.sent[-1]
+    submission = hx.store.get_submission_by_proof_message(GUILD, proof.id)
+    before = len(hx.channel.sent)
+
+    await hx.flag(submission, UNAVAILABLE)
+
+    assert "couldn't run" in proof.embeds[0].fields[-1].value
+    assert "score stands" in proof.embeds[0].fields[-1].value
+    stored = hx.store.get_submission(GUILD, submission.id)
+    assert stored.vision_verdict == "unavailable", "and it's on the ledger too"
+    assert not stored.is_pending_review, "an outage must never cost the player a flag"
+    assert len(hx.channel.sent) == before, "no new message — the photo post carries it"
+    assert hx.reactions_on(proof.id) == set()
+    hx.close()
+
+
+async def test_a_crown_post_gets_a_field_and_keeps_its_photo(tmp_path, monkeypatch):
+    """A crown announcement is an embed with the photo pulled into it. Editing
+    it must add the status without losing the proof."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    await hx.submit("Godzilla", "5,000,000")
+    proof = hx.channel.sent[-1]
+    image_before = proof.embeds[0].image.url
+    submission = hx.store.get_submission_by_proof_message(GUILD, proof.id)
+
+    await hx.flag(submission, VisionResult("match", score=5_000_000))
+
+    field = proof.embeds[0].fields[-1]
+    assert field.name == "Photo check"
+    assert "matches" in field.value
+    assert proof.embeds[0].image.url == image_before, "the photo must survive the edit"
+    hx.close()
+
+
+async def test_the_status_line_is_replaced_not_stacked(tmp_path, monkeypatch):
+    """Flag then review means two annotations on one post."""
+    hx = await Harness.create(tmp_path, monkeypatch)
+    await hx.submit("Godzilla", "5,000,000", user_id=BOB, name="bob")
+    await hx.submit("Godzilla", "1,000,000")
+    proof = hx.channel.sent[-1]
+    submission = hx.store.get_submission_by_proof_message(GUILD, proof.id)
+
+    await hx.flag(submission, MISMATCH)
+    await hx.react(proof.id, APPROVE, user_id=ADMIN)
+
+    assert proof.content.count("Photo check") == 1, "one status line, not a pile"
+    assert "reviewed by" in proof.content
+    assert "score stands" in proof.content
+    hx.close()
+
+
+async def test_a_dropped_score_says_who_dropped_it(tmp_path, monkeypatch):
+    hx = await Harness.create(tmp_path, monkeypatch)
+    submission, proof = await flagged(hx)
+
+    await hx.react(proof.id, DROP, user_id=ADMIN)
+
+    field = proof.embeds[0].fields[-1]
+    assert f"<@{ADMIN}>" in field.value
+    assert "dropped" in field.value
+    hx.close()
+
+
+async def test_the_last_check_is_remembered_for_config_show(tmp_path, monkeypatch):
+    hx = await Harness.create(tmp_path, monkeypatch)
+    assert hx.review.last_check is None, "nothing checked yet"
+
+    await hx.submit("Godzilla", "5,000,000")
+    proof = hx.channel.sent[-1]
+    await hx.flag(hx.store.get_submission_by_proof_message(GUILD, proof.id), UNAVAILABLE)
+
+    verdict, reasoning, _when = hx.review.last_check
+    assert verdict == "unavailable"
+    assert "out of credit" in reasoning
+    hx.close()

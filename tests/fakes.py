@@ -94,6 +94,21 @@ class FakeMessage:
                     types.SimpleNamespace(url=url, filename=file.filename)
                 )
         self.jump_url = f"https://discord.com/channels/{GUILD}/{channel.id}/{self.id}"
+        self.edits = 0
+
+    async def edit(self, *, content=None, embed=None, allowed_mentions=None):
+        """Record an edit the way Discord applies one.
+
+        Note what is *not* touched: attachments. The photo is the whole point of
+        a proof post, and an edit that dropped it would be silent — the message
+        would still be there, just without the proof.
+        """
+        self.edits += 1
+        if content is not None:
+            self.content = content
+        if embed is not None:
+            self.embeds = [embed]
+        return self
 
 
 class FakeChannel(discord.abc.Messageable):

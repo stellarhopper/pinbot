@@ -26,7 +26,7 @@ from discord.ext import commands
 from . import embeds
 from .perms import has_admin_access
 from .scoring import format_score
-from .store import Store, Submission
+from .store import Store, Submission, now
 from .vision import VisionResult
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,10 @@ class ReviewCog(commands.Cog):
     def __init__(self, bot: commands.Bot, store: Store) -> None:
         self.bot = bot
         self.store = store
+        # (verdict, reasoning, when) for the most recent check on this process.
+        # Deliberately not persisted: the question it answers is "is the check
+        # working *right now*", which a restart resets anyway.
+        self.last_check: tuple[str, str | None, int] | None = None
 
     # ------------------------------------------------------------- flagging
 
@@ -86,7 +90,11 @@ class ReviewCog(commands.Cog):
         table_name: str,
         result: VisionResult,
     ) -> None:
-        """Record the verdict, and if it needs a look, say so and add the buttons.
+        """Record the verdict, say so under the photo, and flag if it needs a look.
+
+        Every verdict is recorded and shown, including "unavailable". A check
+        that silently did nothing used to be indistinguishable from one that
+        ran and agreed — which is how a broken check survives a whole event.
 
         Never raises: this runs in a background task behind an already-confirmed
         submission, and a failure here must cost the player nothing.
@@ -94,6 +102,10 @@ class ReviewCog(commands.Cog):
         try:
             self.store.set_vision_result(
                 guild_id, submission.id, score=result.score, verdict=result.verdict
+            )
+            self.last_check = (result.verdict, result.reasoning, now())
+            await self.annotate(
+                submission, embeds.vision_status(result, table_name)
             )
             if not result.needs_review:
                 return
@@ -152,6 +164,58 @@ class ReviewCog(commands.Cog):
                 "use /flagged and /drop",
                 proof.channel.id,
             )
+
+    async def annotate(self, submission: Submission, status: str) -> None:
+        """Put the check's verdict on the proof post itself, next to the photo.
+
+        Two shapes to handle, and the difference is not cosmetic. A crown
+        announcement is an embed with the photo pulled into it, so the status
+        goes in a field; an ordinary submission is plain text with the photo
+        attached, so it goes in a subtext line. Editing either must leave the
+        attachment alone — the photo is the whole point of the message.
+        """
+        channel = self._channel(submission)
+        if channel is None or not submission.proof_message_id:
+            return
+        try:
+            # A PartialMessage can't be read, and the crown embed has to be
+            # edited as Discord stored it: the attachment:// reference was
+            # rewritten to a CDN URL when it was posted, and rebuilding the
+            # embed from scratch would lose the photo.
+            message = await channel.fetch_message(submission.proof_message_id)
+            if message.embeds:
+                embed = message.embeds[0]
+                existing = next(
+                    (i for i, f in enumerate(embed.fields) if f.name == embeds.VISION_FIELD),
+                    None,
+                )
+                if existing is None:
+                    embed.add_field(name=embeds.VISION_FIELD, value=status, inline=False)
+                else:
+                    embed.set_field_at(
+                        existing, name=embeds.VISION_FIELD, value=status, inline=False
+                    )
+                await message.edit(embed=embed)
+            else:
+                body = embeds.strip_vision_line(message.content)
+                await message.edit(
+                    content=f"{body}\n{embeds.VISION_PREFIX} {status}",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+        except discord.Forbidden:
+            log.warning(
+                "cannot edit my own proof post in channel %s, so the photo check "
+                "result won't be shown under the photo",
+                submission.proof_channel_id,
+            )
+        except (discord.HTTPException, discord.NotFound):
+            log.info("could not annotate the proof post for %s", submission.id)
+
+    def _channel(self, submission: Submission) -> discord.abc.Messageable | None:
+        if not submission.proof_channel_id:
+            return None
+        channel = self.bot.get_channel(submission.proof_channel_id)
+        return channel if isinstance(channel, discord.abc.Messageable) else None
 
     def _proof_message(self, submission: Submission) -> discord.PartialMessage | None:
         """A handle on the proof post without fetching it."""
@@ -230,9 +294,10 @@ class ReviewCog(commands.Cog):
             target=f"submission:{submission.id}",
         )
         await self._clear_buttons(submission)
-        await self._say(
-            submission,
-            f"{APPROVE} <@{payload.user_id}> checked `#{submission.id}` — the score stands.",
+        # The verdict line under the photo becomes the record of the decision,
+        # so an approved score needs no further message in the channel.
+        await self.annotate(
+            submission, embeds.vision_reviewed(True, payload.user_id)
         )
 
     async def _drop(
@@ -253,6 +318,9 @@ class ReviewCog(commands.Cog):
             detail="photo review",
         )
         await self._clear_buttons(submission)
+        await self.annotate(
+            submission, embeds.vision_reviewed(False, payload.user_id)
+        )
 
         machine = self.store.get_table(guild_id, submission.table_id)
         table_name = machine.name if machine else "an unknown table"

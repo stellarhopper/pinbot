@@ -144,6 +144,11 @@ class AdminCog(commands.Cog):
         except discord.HTTPException:
             log.exception("failed to announce in guild %s", guild_id)
 
+    def _last_check(self) -> tuple[str, str | None, int] | None:
+        """What the photo check last did, from the review cog if it's loaded."""
+        cog = self.bot.get_cog("ReviewCog")
+        return getattr(cog, "last_check", None)
+
     async def _adopt_channel(self, interaction: discord.Interaction) -> bool:
         """Claim the channel a setup command was run in, if none is set yet.
 
@@ -844,6 +849,13 @@ class AdminCog(commands.Cog):
             check = "on"
             if pending:
                 check += f" — **{pending}** waiting for review (`/flagged`)"
+            last = self._last_check()
+            if last is None:
+                check += "\n_no photo checked yet since the last restart_"
+            else:
+                verdict, reasoning, when = last
+                detail = f" ({reasoning})" if verdict == "unavailable" and reasoning else ""
+                check += f"\nlast check {embeds.ts(when, 'R')}: **{verdict}**{detail}"
         embed.add_field(name="Photo cross-check", value=check, inline=False)
         embed.add_field(
             name="Flag pings",

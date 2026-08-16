@@ -19,6 +19,7 @@ import discord
 from .durations import format_duration
 from .scoring import format_score
 from .store import AuditEntry, Submission, Table, TableStats, Tournament, now
+from .vision import VisionResult
 
 GOLD = discord.Color.from_rgb(240, 185, 40)
 GREY = discord.Color.from_rgb(120, 125, 135)
@@ -168,6 +169,55 @@ def logged_line(table_name: str, submission: Submission, king: Submission | None
         f"{format_score(submission.score)} — **{format_score(gap)}** short of "
         f"<@{king.user_id}>'s {format_score(king.score)} · `#{submission.id}`"
     )
+
+
+# -------------------------------------------------------------- photo check
+
+# Discord renders "-# " as small grey subtext, which is exactly the weight this
+# deserves: present on every photo, but never competing with the score itself.
+VISION_PREFIX = "-# \N{CAMERA WITH FLASH} Photo check:"
+VISION_FIELD = "Photo check"
+
+
+def vision_status(result: VisionResult, table_name: str | None = None) -> str:
+    """One line describing what the photo check made of a submission.
+
+    Written to be read by players, not just admins: it appears under every
+    photo once the check has run. A verdict of "unavailable" is the bot's own
+    failure, so it says so plainly and makes clear the score is unaffected —
+    silence there is what made a broken check indistinguishable from a working
+    one.
+    """
+    if result.verdict == "match":
+        text = f"matches — read {format_score(result.score)} off the photo."
+    elif result.verdict == "mismatch":
+        text = (
+            f"the photo reads **{format_score(result.score)}** — flagged for a "
+            "second look."
+        )
+    elif result.verdict == "illegible":
+        text = "couldn't read the display — flagged for a second look."
+    else:
+        text = "couldn't run just now. The score stands."
+
+    if table_name and result.wrong_table(table_name):
+        text += f" The machine looks like **{result.table_name}**."
+    return text
+
+
+def vision_reviewed(approved: bool, reviewer_id: int) -> str:
+    """Replaces the status line once a human has ruled on a flag."""
+    if approved:
+        return f"reviewed by <@{reviewer_id}> — the score stands."
+    return f"reviewed by <@{reviewer_id}> — score dropped."
+
+
+def strip_vision_line(content: str | None) -> str:
+    """Remove any status line already there, so re-annotating can't stack them."""
+    if not content:
+        return ""
+    kept = [ln for ln in content.split("\n") if not ln.startswith(VISION_PREFIX)]
+    return "\n".join(kept).rstrip()
 
 
 # ----------------------------------------------------------------- standings
