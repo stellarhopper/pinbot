@@ -31,8 +31,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-# 2 added submissions.user_avatar. Bump alongside a matching _MIGRATIONS entry.
-SCHEMA_VERSION = 2
+# 2 added submissions.user_avatar. 3 added the photo-review columns. Bump
+# alongside a matching _MIGRATIONS entry.
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -90,12 +91,19 @@ CREATE TABLE IF NOT EXISTS submissions (
     voided_by        INTEGER,
     void_reason      TEXT,
     vision_score     INTEGER,
-    vision_verdict   TEXT
+    vision_verdict   TEXT,
+    flagged_at       INTEGER,
+    reviewed_at      INTEGER,
+    reviewed_by      INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_submissions_standings
     ON submissions (guild_id, tournament_id, table_id, voided_at, score DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_voided
     ON submissions (guild_id, tournament_id, voided_at);
+-- Backs the reaction -> submission lookup: every reaction in the pinball
+-- channel hits this, including the many on messages that aren't proof posts.
+CREATE INDEX IF NOT EXISTS idx_submissions_proof
+    ON submissions (guild_id, proof_message_id);
 
 CREATE TABLE IF NOT EXISTS audit (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +122,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_guild ON audit (guild_id, at DESC);
 # applied separately — a live tournament's scores are not disposable.
 _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("submissions", "user_avatar", "TEXT"),
+    ("submissions", "flagged_at", "INTEGER"),
+    ("submissions", "reviewed_at", "INTEGER"),
+    ("submissions", "reviewed_by", "INTEGER"),
 )
 
 # Setting keys, so typos surface here rather than as a silently missing value.
@@ -267,10 +278,22 @@ class Submission:
     void_reason: str | None
     vision_score: int | None
     vision_verdict: str | None
+    flagged_at: int | None
+    reviewed_at: int | None
+    reviewed_by: int | None
 
     @property
     def is_voided(self) -> bool:
         return self.voided_at is not None
+
+    @property
+    def is_pending_review(self) -> bool:
+        """Flagged by the photo check and not yet decided by a human.
+
+        This is the gate on the whole reaction flow: without it, a stray ❌ on
+        any proof post at all would void a score.
+        """
+        return self.flagged_at is not None and self.reviewed_at is None
 
 
 def _table(row: sqlite3.Row) -> Table:
@@ -443,6 +466,12 @@ class Store:
     def get_vision_ping_role_id(self, guild_id: int) -> int | None:
         raw = self.get_setting(guild_id, VISION_PING_KEY)
         return int(raw) if raw else None
+
+    def set_vision_ping_role_id(self, guild_id: int, role_id: int | None) -> None:
+        if role_id is None:
+            self.delete_setting(guild_id, VISION_PING_KEY)
+        else:
+            self.set_setting(guild_id, VISION_PING_KEY, str(role_id))
 
     # ------------------------------------------------------------------ tables
 
@@ -881,6 +910,71 @@ class Store:
                 "WHERE guild_id = ? AND id = ?",
                 (score, verdict, guild_id, submission_id),
             )
+
+    # ---------------------------------------------------------- photo review
+
+    def get_submission_by_proof_message(
+        self, guild_id: int, message_id: int
+    ) -> Submission | None:
+        """Find the submission whose proof photo is that message.
+
+        Guild-scoped like every other lookup here, so a reaction in one server
+        can never reach another server's ledger.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM submissions WHERE guild_id = ? AND proof_message_id = ?",
+            (guild_id, message_id),
+        ).fetchone()
+        return _submission(row) if row else None
+
+    def flag_submission(
+        self, guild_id: int, submission_id: int, *, at: int | None = None
+    ) -> Submission | None:
+        """Mark a submission as needing a human look. Returns None if not found."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE submissions SET flagged_at = ? WHERE guild_id = ? AND id = ?",
+                (at or now(), guild_id, submission_id),
+            )
+        return self._get_submission(guild_id, submission_id)
+
+    def review_submission(
+        self, guild_id: int, submission_id: int, *, by: int, at: int | None = None
+    ) -> Submission | None:
+        """Claim a pending flag for ``by``. Returns None if there was none.
+
+        The claim is the whole point: the UPDATE only matches a flag that is
+        still undecided, so of two admins reacting at the same instant exactly
+        one gets a Submission back and the other gets None. Acting only on the
+        non-None result is what stops a score being voided twice, or an
+        approval and a drop both being announced.
+
+        What was decided is deliberately not stored: an approved score is one
+        that is reviewed and not voided, and a dropped one goes through the
+        ordinary void path so the crown reverts and the usual announcement
+        fires with no new code.
+        """
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE submissions SET reviewed_at = ?, reviewed_by = ? "
+                "WHERE guild_id = ? AND id = ? "
+                "AND flagged_at IS NOT NULL AND reviewed_at IS NULL",
+                (at or now(), by, guild_id, submission_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self._get_submission(guild_id, submission_id)
+
+    def pending_flags(self, guild_id: int, tournament_id: int) -> list[Submission]:
+        """Flagged, undecided submissions, oldest first — the review queue."""
+        rows = self._conn.execute(
+            "SELECT * FROM submissions "
+            "WHERE guild_id = ? AND tournament_id = ? "
+            "AND flagged_at IS NOT NULL AND reviewed_at IS NULL "
+            "ORDER BY flagged_at ASC, id ASC",
+            (guild_id, tournament_id),
+        )
+        return [_submission(r) for r in rows]
 
     def drop_all_scores(self, guild_id: int, tournament_id: int) -> int:
         with self._conn:

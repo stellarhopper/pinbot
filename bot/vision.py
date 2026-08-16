@@ -1,7 +1,11 @@
-"""Phase 2, opt-in: cross-check the claimed score against the photo.
+"""Opt-in: cross-check the claimed score against the photo.
 
-Deliberately not wired into the submission path yet. Two properties this module
-must keep whenever it is:
+Called from the submission path once the score is already on the ledger, and
+what it catches is *honest mistakes* — a fat-fingered digit, a photo of the
+wrong machine, a score typed while the ball was still in play — while the
+player is still standing at the machine. It is not the integrity backstop; the
+tournament is reconciled against the machines' own high-score tables at the
+end. Two properties this module must keep:
 
 * **It never rejects a submission.** A mismatch flags the score for admin
   review; the score stands until a human acts. Segment and DMD displays are
@@ -39,12 +43,19 @@ _SCHEMA = {
             "type": "boolean",
             "description": "Whether a score was clearly readable in the photo.",
         },
+        "table_name": {
+            "type": ["string", "null"],
+            "description": (
+                "The pinball machine in the photo, from the backglass or "
+                "cabinet art, or null if it can't be identified."
+            ),
+        },
         "reasoning": {
             "type": "string",
             "description": "One sentence on what was visible.",
         },
     },
-    "required": ["score", "legible", "reasoning"],
+    "required": ["score", "legible", "table_name", "reasoning"],
     "additionalProperties": False,
 }
 
@@ -54,7 +65,8 @@ _PROMPT = (
     "player being reported. Pinball displays are often dot-matrix, segmented, "
     "or reflective, and photos are taken at an angle in poor light — if you "
     "cannot read a score confidently, set legible to false and score to null "
-    "rather than guessing."
+    "rather than guessing. Also name the machine if the backglass or cabinet "
+    "art identifies it, and null if it doesn't."
 )
 
 
@@ -63,10 +75,29 @@ class VisionResult:
     verdict: str  # "match" | "mismatch" | "illegible" | "unavailable"
     score: int | None = None
     reasoning: str | None = None
+    table_name: str | None = None
 
     @property
     def needs_review(self) -> bool:
-        return self.verdict == "mismatch"
+        """Whether a human should look at this one.
+
+        "illegible" counts: proof nobody can read is not proof, and the point
+        of flagging it is to get an explicit human sign-off rather than to let
+        it pass silently. "unavailable" never counts — that is the bot's own
+        failure, and it must not cost a player anything.
+        """
+        return self.verdict in {"mismatch", "illegible"}
+
+    def wrong_table(self, claimed: str) -> bool:
+        """Whether the photo looks like a different machine than the one claimed.
+
+        Reported in the flag text but deliberately never a flag on its own,
+        until we've seen how reliable the reads are. Backglass art is often out
+        of frame entirely, and a null here means "couldn't tell", not "wrong".
+        """
+        if not self.table_name:
+            return False
+        return self.table_name.strip().casefold() != claimed.strip().casefold()
 
 
 def is_available() -> bool:
@@ -92,7 +123,13 @@ async def check_score(
         response = await client.messages.create(
             model=MODEL,
             max_tokens=1024,
-            output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
+            # Reading a display is perception, not reasoning, and this runs on
+            # every submission — so effort is the cost lever that matters here.
+            # Raise it if the reads start disappointing.
+            output_config={
+                "effort": "low",
+                "format": {"type": "json_schema", "schema": _SCHEMA},
+            },
             messages=[
                 {
                     "role": "user",
@@ -120,8 +157,24 @@ async def check_score(
         log.exception("vision check failed")
         return VisionResult("unavailable", reasoning="check errored")
 
+    # A response that isn't the shape we asked for is our problem, not the
+    # player's. Degrading it to "illegible" would be the worst failure mode
+    # this bot has: schema drift on the API side would publicly flag and
+    # @mention on every single submission. "unavailable" stays quiet.
+    if not isinstance(payload, dict) or not {"score", "legible"} <= payload.keys():
+        log.warning("vision response was not the shape we asked for: %r", payload)
+        return VisionResult("unavailable", reasoning="unexpected response shape")
+
+    table_name = payload.get("table_name")
     if not payload.get("legible") or payload.get("score") is None:
-        return VisionResult("illegible", reasoning=payload.get("reasoning"))
+        return VisionResult(
+            "illegible", reasoning=payload.get("reasoning"), table_name=table_name
+        )
     read = int(payload["score"])
     verdict = "match" if read == claimed_score else "mismatch"
-    return VisionResult(verdict, score=read, reasoning=payload.get("reasoning"))
+    return VisionResult(
+        verdict,
+        score=read,
+        reasoning=payload.get("reasoning"),
+        table_name=table_name,
+    )

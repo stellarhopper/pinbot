@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from bot.store import (
@@ -536,6 +538,160 @@ def test_migration_adds_a_column_to_an_existing_database(tmp_path):
         assert reopened.submission_count(GUILD, 1) == 1
     finally:
         reopened.close()
+
+
+def test_migration_adds_the_review_columns_to_a_v2_database(tmp_path):
+    """Schema 3 lands on a Pi with a live tournament in it, so the three review
+    columns have to arrive by ALTER without disturbing the scores already there."""
+    import sqlite3
+
+    from bot import store as store_module
+
+    added = ("flagged_at", "reviewed_at", "reviewed_by")
+    v2_schema = store_module._SCHEMA
+    for column in added:
+        v2_schema = re.sub(rf"\n *{column} +INTEGER,?", "", v2_schema)
+    v2_schema = v2_schema.replace("    vision_verdict   TEXT,", "    vision_verdict   TEXT")
+    for column in added:
+        assert column not in v2_schema, "the v2 shape must genuinely lack the column"
+
+    path = tmp_path / "v2.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(v2_schema)
+    conn.execute(
+        "INSERT INTO tables (guild_id, name, active, sort_order, created_at) "
+        "VALUES (?, 'Godzilla', 1, 1, 0)",
+        (GUILD,),
+    )
+    conn.execute(
+        "INSERT INTO tournaments (guild_id, name, started_at, started_by) "
+        "VALUES (?, 'Old', 0, ?)",
+        (GUILD, ADMIN),
+    )
+    conn.execute(
+        "INSERT INTO submissions "
+        "(guild_id, tournament_id, table_id, user_id, user_display, score, created_at, "
+        " proof_message_id) "
+        "VALUES (?, 1, 1, ?, 'alice', 3127605730, 100, 7001)",
+        (GUILD, ALICE),
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(path)
+    try:
+        columns = {
+            row["name"] for row in store._conn.execute("PRAGMA table_info(submissions)")
+        }
+        assert set(added) <= columns
+
+        survivor = store.get_submission(GUILD, 1)
+        assert survivor is not None
+        assert survivor.score == 3_127_605_730
+        assert not survivor.is_pending_review, "an old score is not retroactively flagged"
+
+        # The new index is created by executescript on open, not by _migrate,
+        # so this is the assertion that an upgraded database can still do the
+        # reaction lookup at all.
+        assert store.get_submission_by_proof_message(GUILD, 7001) is not None
+    finally:
+        store.close()
+
+
+# ------------------------------------------------------------- photo review
+
+def test_a_flag_is_pending_until_someone_decides(fx):
+    submission, _, _ = fx.submit(ALICE, 1_000_000)
+    assert not submission.is_pending_review, "a fresh score is not flagged"
+
+    flagged = fx.store.flag_submission(GUILD, submission.id)
+    assert flagged is not None and flagged.is_pending_review
+
+    reviewed = fx.store.review_submission(GUILD, submission.id, by=ADMIN)
+    assert reviewed is not None
+    assert not reviewed.is_pending_review
+    assert reviewed.reviewed_by == ADMIN
+    assert not reviewed.is_voided, "approving leaves the score standing"
+
+
+def test_only_one_reviewer_can_claim_a_flag(fx):
+    """Two admins can react at the same instant. Exactly one may act, or the
+    score gets voided twice and both an approval and a drop get announced."""
+    submission, _, _ = fx.submit(ALICE, 1_000_000)
+    fx.store.flag_submission(GUILD, submission.id)
+
+    first = fx.store.review_submission(GUILD, submission.id, by=ADMIN)
+    second = fx.store.review_submission(GUILD, submission.id, by=BOB)
+
+    assert first is not None, "the first reviewer wins"
+    assert second is None, "the second is told to do nothing"
+    assert fx.store.get_submission(GUILD, submission.id).reviewed_by == ADMIN
+
+
+def test_an_unflagged_submission_cannot_be_reviewed(fx):
+    """The reaction handler leans on this: without it, a ❌ on any proof post at
+    all would be a valid void."""
+    submission, _, _ = fx.submit(ALICE, 1_000_000)
+    assert fx.store.review_submission(GUILD, submission.id, by=ADMIN) is None
+    assert fx.store.get_submission(GUILD, submission.id).reviewed_at is None
+
+
+def test_dropping_a_flagged_score_reverts_the_crown(fx):
+    """A drop goes through the ordinary void path, which is the whole reason
+    there is no review_action column."""
+    low, _, _ = fx.submit(ALICE, 1_000_000)
+    high, _, _ = fx.submit(BOB, 5_000_000)
+    assert fx.king().id == high.id
+
+    fx.store.flag_submission(GUILD, high.id)
+    assert fx.store.review_submission(GUILD, high.id, by=ADMIN) is not None
+    fx.store.void_submission(GUILD, high.id, voided_by=ADMIN, reason="photo review")
+
+    assert fx.king().id == low.id
+
+
+def test_proof_message_lookup_is_guild_scoped(store):
+    """The same message ID in another guild must not reach this ledger."""
+    mine = Fixture(store, GUILD)
+    theirs = Fixture(store, OTHER_GUILD)
+    submission, _, _ = mine.submit(ALICE, 1_000_000)
+    store.attach_proof(
+        GUILD,
+        submission.id,
+        channel_id=900,
+        message_id=7001,
+        jump_url="https://discord.com/channels/1/2/3",
+        filename="proof.jpg",
+    )
+
+    assert store.get_submission_by_proof_message(GUILD, 7001).id == submission.id
+    assert store.get_submission_by_proof_message(OTHER_GUILD, 7001) is None
+    assert store.get_submission_by_proof_message(GUILD, 9999) is None
+    assert theirs.store.submission_count(OTHER_GUILD, theirs.tournament.id) == 0
+
+
+def test_pending_flags_lists_the_queue_oldest_first(fx):
+    first, _, _ = fx.submit(ALICE, 1_000_000)
+    second, _, _ = fx.submit(BOB, 2_000_000)
+    third, _, _ = fx.submit(CARL, 3_000_000)
+
+    fx.store.flag_submission(GUILD, second.id, at=100)
+    fx.store.flag_submission(GUILD, first.id, at=200)
+    # third is never flagged
+
+    queue = fx.store.pending_flags(GUILD, fx.tournament.id)
+    assert [s.id for s in queue] == [second.id, first.id]
+
+    fx.store.review_submission(GUILD, second.id, by=ADMIN)
+    assert [s.id for s in fx.store.pending_flags(GUILD, fx.tournament.id)] == [first.id]
+
+
+def test_the_ping_role_round_trips_and_clears(store):
+    assert store.get_vision_ping_role_id(GUILD) is None
+    store.set_vision_ping_role_id(GUILD, 4242)
+    assert store.get_vision_ping_role_id(GUILD) == 4242
+    store.set_vision_ping_role_id(GUILD, None)
+    assert store.get_vision_ping_role_id(GUILD) is None
 
 
 # ------------------------------------------------------------- name validation

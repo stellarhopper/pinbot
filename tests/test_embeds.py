@@ -47,6 +47,9 @@ def sub(
         void_reason="cheating" if voided else None,
         vision_score=None,
         vision_verdict=None,
+        flagged_at=None,
+        reviewed_at=None,
+        reviewed_by=None,
     )
 
 
