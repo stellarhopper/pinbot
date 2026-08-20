@@ -556,3 +556,37 @@ def test_an_empty_log_is_one_embed_that_explains_itself():
 def test_a_cleared_log_keeps_its_note():
     built = embeds.audit_embeds([], 0, cleared_note="Wiped 12 entries.")
     assert built[0].description == "Wiped 12 entries."
+
+
+# ------------------------------------------------------------- who gets named
+
+def test_the_compact_line_names_the_leader_without_mentioning_them():
+    """The standing leader is dragged into every submission on their table by
+    every other player. A highlighted mention makes each one look addressed to
+    them, which is what made a busy table read as spam."""
+    king = sub(9_000_000, id=1, user_id=1, display="alice")
+    attempt = sub(5_000_000, id=2, user_id=2, display="bob")
+
+    line = embeds.logged_line("Godzilla", attempt, king)
+
+    assert "<@1>" not in line, "the leader is named, not mentioned"
+    assert "alice" in line
+    assert "<@2>" in line, "but the submitter still is — the post is theirs"
+
+
+def test_a_leader_with_markdown_in_their_name_cannot_reformat_the_line():
+    """Display names are user-controlled, and this is the one place one lands
+    in markup rather than an embed author field."""
+    king = sub(9_000_000, id=1, user_id=1, display="**Big**Bad_Bill_")
+    attempt = sub(5_000_000, id=2, user_id=2)
+
+    line = embeds.logged_line("Godzilla", attempt, king)
+
+    assert r"\*\*Big\*\*Bad\_Bill\_" in line
+    assert "4,000,000" in line.replace("**", ""), "the real bold markers still work"
+
+
+def test_an_empty_table_line_mentions_only_the_submitter():
+    line = embeds.logged_line("Godzilla", sub(5_000_000, id=2, user_id=2), None)
+    assert line.count("<@") == 1
+    assert "<@2>" in line

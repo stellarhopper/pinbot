@@ -25,6 +25,8 @@ filterwarnings = [
     # discord.py 2.7 on Python 3.14. Upstream's to fix, and it fires on every
     # command registration, which drowns out warnings that are ours.
     "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
+    # Also discord.py 2.7 on 3.14, from escape_markdown's own re.sub call.
+    "ignore:'count' is passed as positional argument:DeprecationWarning",
 ]
 
 [tool.setuptools]

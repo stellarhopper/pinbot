@@ -309,7 +309,7 @@ silently.
 .venv/bin/python -m pytest
 ```
 
-404 tests, no Discord connection needed, under a second. Two tiers:
+409 tests, no Discord connection needed, under a second. Two tiers:
 
 **Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
 `test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,

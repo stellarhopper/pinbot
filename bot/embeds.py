@@ -108,6 +108,16 @@ def _margin_line(king: Submission, runner_up: Submission | None) -> str:
     return f"leading by {format_score(lead)}"
 
 
+def display_name(submission: Submission) -> str:
+    """A player's name, safe to drop into a markdown line.
+
+    Display names are user-controlled, and this is the first place one is
+    rendered into markup rather than into an embed author field — an asterisk
+    or a backtick in a nickname would otherwise reformat the line around it.
+    """
+    return discord.utils.escape_markdown(submission.user_display)
+
+
 def _proof_link(submission: Submission) -> str | None:
     return f"[view proof]({submission.proof_jump_url})" if submission.proof_jump_url else None
 
@@ -164,10 +174,14 @@ def logged_line(table_name: str, submission: Submission, king: Submission | None
             f"{format_score(submission.score)} · `#{submission.id}`"
         )
     gap = king.score - submission.score
+    # The standing leader is named, not mentioned. They are dragged into every
+    # single submission on their table by every other player, and a highlighted
+    # mention makes each one look addressed to them. The submitter above is
+    # mentioned because the post is theirs.
     return (
         f"\N{CAMERA} <@{submission.user_id}> · **{table_name}** · "
         f"{format_score(submission.score)} — **{format_score(gap)}** short of "
-        f"<@{king.user_id}>'s {format_score(king.score)} · `#{submission.id}`"
+        f"{display_name(king)}'s {format_score(king.score)} · `#{submission.id}`"
     )
 
 

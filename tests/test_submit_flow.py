@@ -500,3 +500,45 @@ async def test_the_new_autocomplete_does_not_offer_the_wildcard(tmp_path, monkey
     choices = await h.scores.table_autocomplete(FakeInteraction(), "")
     assert "*" not in [c.value for c in choices]
     h.close()
+
+
+# ----------------------------------------------------- mention hygiene
+
+async def test_hs_cannot_be_used_to_ping_someone(tmp_path, monkeypatch):
+    """/hs answers in public and echoes the table argument back. Without a
+    mention policy, `/hs table:<@someone>` makes the bot ping an arbitrary
+    person on any player's say-so — user mentions need no permission at all."""
+    h = await Harness.create(tmp_path, monkeypatch)
+
+    itx = await h.hs("<@197105676512788491> and <@&777> and @everyone")
+
+    echoed = [
+        (content, policy)
+        for (_k, content, _e, _es), policy in zip(itx.record, itx.mentions)
+        if content and "don't have a table" in content
+    ]
+    assert echoed, "the unknown-table reply is the echo path"
+    content, policy = echoed[0]
+    assert "197105676512788491" in content, "it really does echo the argument back"
+    assert policy is not None, "a public echo of user input must state a policy"
+    assert policy.everyone is False
+    assert policy.users in (False, [], None)
+    assert policy.roles in (False, [], None)
+    h.close()
+
+
+async def test_every_public_reply_states_a_mention_policy(tmp_path, monkeypatch):
+    """A send with no stated policy is the one that gets copied into the next
+    feature. Public replies must all be explicit."""
+    import inspect
+    import re
+    from bot import scores as scores_module
+
+    source = inspect.getsource(scores_module)
+    sends = re.findall(
+        r"(?:followup\.send|channel\.send)\((?:[^()]|\([^()]*\))*\)", source
+    )
+    public = [s for s in sends if "ephemeral=True" not in s]
+    assert public, "sanity: there are public sends to check"
+    missing = [s for s in public if "allowed_mentions" not in s]
+    assert not missing, f"public send without a mention policy: {missing}"

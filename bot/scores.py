@@ -207,6 +207,7 @@ class ScoresCog(commands.Cog):
                 f"{embeds.CROWN} Recorded — **{format_score(value)}** on "
                 f"**{machine.name}**. You're the new king of the hill!",
                 ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
             )
         else:
             standing = (
@@ -219,6 +220,11 @@ class ScoresCog(commands.Cog):
                 f"Logged **{format_score(value)}** on **{machine.name}** as "
                 f"`#{submission.id}`. {standing}",
                 ephemeral=True,
+                # Only the submitter sees this, so the leader's mention here
+                # reaches nobody else — but every other send in the bot states
+                # its mention policy, and the one that doesn't is the one that
+                # gets copied.
+                allowed_mentions=discord.AllowedMentions.none(),
             )
 
     # ------------------------------------------------------------ photo check
@@ -333,6 +339,7 @@ class ScoresCog(commands.Cog):
                 message = await channel.send(
                     embed=embeds.crown_embed(machine.name, submission, previous, filename),
                     file=proofs.as_file(data, filename),
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
             else:
                 message = await channel.send(
@@ -378,14 +385,16 @@ class ScoresCog(commands.Cog):
         if tournament is None:
             await interaction.followup.send(
                 "No tournament has run here yet. An admin can start one with "
-                "`/tournament start`."
+                "`/tournament start`.",
+                allowed_mentions=discord.AllowedMentions.none(),
             )
             return
 
         tables = self.store.list_tables(guild_id)
         if not tables:
             await interaction.followup.send(
-                "No tables are set up yet. An admin needs to add them with `/table add`."
+                "No tables are set up yet. An admin needs to add them with `/table add`.",
+                allowed_mentions=discord.AllowedMentions.none(),
             )
             return
 
@@ -401,9 +410,15 @@ class ScoresCog(commands.Cog):
                 return
             if table.strip().lower() not in ALL_TABLES_ALIASES:
                 names = ", ".join(f"**{t.name}**" for t in tables)
+                # /hs answers in public and this echoes the raw argument, so
+                # `/hs table:<@someone>` would otherwise have the bot ping an
+                # arbitrary person on any player's command. User mentions need
+                # no permission at all — unlike @everyone, which the bot's
+                # invite already denies.
                 await interaction.followup.send(
                     f"I don't have a table called **{table}**. Try one of: {names}, "
-                    f"or `{ALL_TABLES}` for every table in detail."
+                    f"or `{ALL_TABLES}` for every table in detail.",
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
                 return
             built = [

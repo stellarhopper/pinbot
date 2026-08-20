@@ -256,8 +256,9 @@ class NoHistoryChannel(FakeChannel):
 
 
 class FakeResponse:
-    def __init__(self, record: list) -> None:
+    def __init__(self, record: list, mentions: list | None = None) -> None:
         self._record = record
+        self._mentions = mentions if mentions is not None else []
         self._done = False
         self.modal = None
 
@@ -276,6 +277,7 @@ class FakeResponse:
             view.value = True
             view.stop()
         self._record.append(("response", content, kwargs.get("embed"), kwargs.get("embeds")))
+        self._mentions.append(kwargs.get("allowed_mentions"))
 
     async def send_modal(self, modal) -> None:
         self._done = True
@@ -297,12 +299,16 @@ class FakeInteraction:
             ),
         )
         self.record: list = []
-        self.response = FakeResponse(self.record)
+        # Mention policy per send, parallel to `record`. Kept separate so the
+        # 4-tuple shape every other test unpacks stays as it was.
+        self.mentions: list = []
+        self.response = FakeResponse(self.record, self.mentions)
         self.channel = channel
         self.followup = types.SimpleNamespace(send=self._followup)
 
     async def _followup(self, content=None, **kwargs) -> None:
         self.record.append(("followup", content, kwargs.get("embed"), kwargs.get("embeds")))
+        self.mentions.append(kwargs.get("allowed_mentions"))
 
     async def edit_original_response(self, **kwargs) -> None:
         self.record.append(("edit", kwargs.get("content"), kwargs.get("embed"), None))
