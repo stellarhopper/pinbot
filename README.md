@@ -15,6 +15,7 @@ needs editing on disk beyond the bot token.
 | --- | --- | --- |
 | `/new <table> <score> <proof> [note]` | anyone | Report a score. Photo required. |
 | `/hs [table]` | anyone | Current high scores. Omit for a summary of every table, name one for its full detail, or `*` for every table in full. |
+| `/roll` | anyone | Can't decide what to play? Picks a table at random. Only you see the answer. |
 | `/tournament start [name] [ends_in]` | admin | Open the submission window. `ends_in` takes `36h`, `2d`, `2d 4h 30m`, `90m`, `1w`. |
 | `/tournament end` | admin | Close it and announce the winners. |
 | `/tournament extend <duration>` | admin | Push the end out — also reopens a tournament ended by mistake. |
@@ -40,7 +41,7 @@ needs editing on disk beyond the bot token.
 role added with `/config admin-role add`. Manage Server always works, so you cannot lock
 yourself out of your own tournament.
 
-`/new` and `/hs` are the only commands players can run; everything else is admin-gated,
+`/new`, `/hs` and `/roll` are the only commands players can run; everything else is admin-gated,
 including the read-only views. `/config reset` and `/reset-all` need Manage Server
 specifically, because both clear the admin-role list — a role-only admin running one would
 be revoking their own access with nothing left to grant it back.
@@ -309,7 +310,7 @@ silently.
 .venv/bin/python -m pytest
 ```
 
-409 tests, no Discord connection needed, under a second. Two tiers:
+413 tests, no Discord connection needed, under a second. Two tiers:
 
 **Unit tests** — `test_store.py`, `test_scoring.py`, `test_durations.py`, `test_perms.py`,
 `test_vision.py`. The ledger (crown, voiding, reverting, tie-breaks), tournament windows,
@@ -338,7 +339,7 @@ approve their own score each fails a test.
 | File | Role |
 | --- | --- |
 | `bot/store.py` | SQLite. The append-only submission ledger and every query. |
-| `bot/scores.py` | `/new` and `/hs`. |
+| `bot/scores.py` | `/new`, `/hs` and `/roll`. |
 | `bot/admin.py` | Tournament control, tables, config, void/restore, purges, auto-close. |
 | `bot/proofs.py` | Photo validation, re-upload, and the fresh-URL cache. |
 | `bot/avatars.py` | Resolves a player's avatar: snapshot first, Discord as fallback. |

@@ -261,6 +261,8 @@ class FakeResponse:
         self._mentions = mentions if mentions is not None else []
         self._done = False
         self.modal = None
+        # Whether the last direct response was visible only to the caller.
+        self.ephemeral: bool | None = None
 
     def is_done(self) -> bool:
         return self._done
@@ -270,6 +272,7 @@ class FakeResponse:
 
     async def send_message(self, content=None, **kwargs) -> None:
         self._done = True
+        self.ephemeral = kwargs.get("ephemeral", False)
         view = kwargs.get("view")
         if view is not None:
             # Auto-approve ConfirmView so the command under test proceeds. The
@@ -509,6 +512,9 @@ class Harness:
         return await self.run(
             self.scores.hs, FakeInteraction(**kwargs), table=table
         )
+
+    async def roll(self, **kwargs) -> FakeInteraction:
+        return await self.run(self.scores.roll, FakeInteraction(**kwargs))
 
     # -- inspecting state ---------------------------------------------------
 

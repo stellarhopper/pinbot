@@ -542,3 +542,59 @@ async def test_every_public_reply_states_a_mention_policy(tmp_path, monkeypatch)
     assert public, "sanity: there are public sends to check"
     missing = [s for s in public if "allowed_mentions" not in s]
     assert not missing, f"public send without a mention policy: {missing}"
+
+
+# ------------------------------------------------------------------ /roll
+
+async def test_roll_names_a_table_to_the_caller_only(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch)
+    before = len(h.channel.sent)
+
+    itx = await h.roll()
+
+    assert itx.response.ephemeral is True, "only the caller should see the pick"
+    assert any(f"**{name}**" in itx.reply for name in ("Godzilla", "Attack From Mars"))
+    assert len(h.channel.sent) == before, "nothing is posted to the channel"
+    policy = itx.mentions[-1]
+    assert policy is not None and policy.users in (False, [], None)
+    h.close()
+
+
+async def test_roll_draws_from_every_active_table_and_no_removed_one(
+    tmp_path, monkeypatch
+):
+    from bot import scores as scores_module
+
+    h = await Harness.create(
+        tmp_path, monkeypatch, tables=("Godzilla", "Attack From Mars", "Medieval Madness")
+    )
+    h.store.set_table_active(h.table_id("Medieval Madness"), False)
+    drawn_from: list[list[str]] = []
+
+    def choice(population):
+        drawn_from.append([t.name for t in population])
+        return population[-1]
+
+    monkeypatch.setattr(scores_module.random, "choice", choice)
+
+    itx = await h.roll()
+
+    assert drawn_from == [["Godzilla", "Attack From Mars"]]
+    assert "**Attack From Mars**" in itx.reply, "the drawn table is the one named"
+    h.close()
+
+
+async def test_roll_does_not_need_a_tournament(tmp_path, monkeypatch):
+    """Picking a machine is useful before the event opens and after it ends."""
+    h = await Harness.create(tmp_path, monkeypatch, tournament=False)
+    itx = await h.roll()
+    assert "Go play" in itx.reply
+    h.close()
+
+
+async def test_roll_with_no_tables_says_how_to_add_them(tmp_path, monkeypatch):
+    h = await Harness.create(tmp_path, monkeypatch, tables=())
+    itx = await h.roll()
+    assert itx.response.ephemeral is True
+    assert "/table add" in itx.reply
+    h.close()

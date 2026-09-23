@@ -1,9 +1,10 @@
-"""Player-facing commands: /new and /hs."""
+"""Player-facing commands: /new, /hs and /roll."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 
 import discord
 from discord import app_commands
@@ -443,6 +444,32 @@ class ScoresCog(commands.Cog):
             )
         await self._send_standings(interaction, guild_id, tournament, tables, built)
         return
+
+    # ------------------------------------------------------------------ /roll
+
+    @app_commands.command(
+        name="roll", description="Can't decide? Pick a table at random for you."
+    )
+    @app_commands.guild_only()
+    async def roll(self, interaction: discord.Interaction) -> None:
+        # Only the caller sees the pick. It's a nudge for one player, and a
+        # public roll would clutter the channel that holds the proof photos.
+        assert interaction.guild_id is not None
+        tables = self.store.list_tables(interaction.guild_id)
+        if not tables:
+            await interaction.response.send_message(
+                "No tables are set up yet. An admin needs to add them with `/table add`.",
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+        machine = random.choice(tables)
+        await interaction.response.send_message(
+            f"\N{GAME DIE} Go play **{machine.name}**.",
+            ephemeral=True,
+            # Table names are admin-typed text; don't let one ping anybody.
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def _detail_embed(
         self, guild_id: int, tournament: Tournament, machine: Table
