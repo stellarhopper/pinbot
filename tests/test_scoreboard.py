@@ -8,6 +8,7 @@ import pytest
 
 from bot import scoreboard
 from bot.config import Config
+from bot.embeds import table_color
 from bot.scoreboard import ScoreboardPublisher, avatar_fetch_url, build_snapshot
 from bot.store import Store
 
@@ -145,6 +146,31 @@ def test_discord_ids_are_strings(store):
     snap = b.snapshot()
     assert snap["tables"][0]["top"][0]["user_id"] == str(big)
     assert snap["guild"]["id"] == str(GUILD)
+
+
+def test_tables_carry_their_hs_colour(board):
+    board.store.add_table(GUILD, "Attack From Mars")
+    tables = board.snapshot()["tables"]
+    expected = [
+        f"#{table_color(t).value:06x}" for t in board.store.list_tables(GUILD)
+    ]
+    assert [t["color"] for t in tables] == expected
+    assert tables[0]["color"] != tables[1]["color"]
+
+
+def test_channel_name_is_passed_through(store):
+    Board(store, GUILD)
+    assert build_snapshot(store, GUILD, "LANfest", "pinball")["channel"] == "pinball"
+    assert build_snapshot(store, GUILD, "LANfest")["channel"] is None
+
+
+async def test_publisher_asks_for_the_channel_name(board, store):
+    client = FakeClient()
+    publisher = ScoreboardPublisher(
+        store, client, TOPIC, Fetcher(), lambda gid: "pinball" if gid == GUILD else None
+    )
+    await publisher.run_once(GUILDS)
+    assert client.snapshots()[-1]["channel"] == "pinball"
 
 
 def test_entry_carries_name_and_avatar_key(board):

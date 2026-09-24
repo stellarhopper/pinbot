@@ -38,6 +38,7 @@ from urllib.parse import urlsplit, urlunsplit
 from discord.ext import commands, tasks
 
 from .config import Config
+from .embeds import table_color
 from .store import Store, Submission, Table, Tournament
 
 log = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ TOP_N = 3
 AVATAR_RETRY_SECONDS = 600
 
 FetchAvatar = Callable[[str], Awaitable[bytes]]
+ChannelName = Callable[[int], str | None]
 
 
 # ------------------------------------------------------------------ snapshot
@@ -115,6 +117,7 @@ def _snapshot(
     guild_name: str,
     tournament: Tournament | None,
     tables: list[tuple[Table, list[Submission]]],
+    channel: str | None = None,
 ) -> dict[str, Any]:
     latest = _latest_per_player(tables)
     return {
@@ -122,6 +125,8 @@ def _snapshot(
         # Discord IDs as strings: they exceed 2**53, and the TV page's
         # JSON.parse would silently round them to someone else's ID.
         "guild": {"id": str(guild_id), "name": guild_name},
+        # Where scores are posted, for the TV's "post with /new in #…" line.
+        "channel": channel,
         "tournament": (
             {
                 "name": tournament.name,
@@ -137,6 +142,9 @@ def _snapshot(
             {
                 "id": table.id,
                 "name": table.name,
+                # The same accent /hs gives this table, so the TV and Discord
+                # agree on which colour is which machine.
+                "color": f"#{table_color(table).value:06x}",
                 "top": [
                     {
                         "score": s.score,
@@ -153,14 +161,16 @@ def _snapshot(
     }
 
 
-def build_snapshot(store: Store, guild_id: int, guild_name: str) -> dict[str, Any]:
+def build_snapshot(
+    store: Store, guild_id: int, guild_name: str, channel: str | None = None
+) -> dict[str, Any]:
     """Everything the TV shows for one guild.
 
     Same tournament choice and same ordering as ``/hs``: the running
     tournament, else the one that ended last, and the top submissions (not the
     top players) with ties going to whoever posted first.
     """
-    return _snapshot(guild_id, guild_name, *_top_submissions(store, guild_id))
+    return _snapshot(guild_id, guild_name, *_top_submissions(store, guild_id), channel)
 
 
 # ----------------------------------------------------------------- publisher
@@ -169,17 +179,23 @@ def build_snapshot(store: Store, guild_id: int, guild_name: str) -> dict[str, An
 class ScoreboardPublisher:
     """Rebuilds snapshots and publishes the ones that changed.
 
-    Knows nothing about Discord beyond a list of (guild id, name) pairs and an
-    avatar fetcher, so tests can drive it with a fake client.
+    Knows nothing about Discord beyond a list of (guild id, name) pairs, an
+    avatar fetcher and a channel-name lookup, so tests can drive it with fakes.
     """
 
     def __init__(
-        self, store: Store, client: Any, topic: str, fetch_avatar: FetchAvatar
+        self,
+        store: Store,
+        client: Any,
+        topic: str,
+        fetch_avatar: FetchAvatar,
+        channel_name: ChannelName = lambda _guild_id: None,
     ) -> None:
         self.store = store
         self.client = client
         self.topic = topic.rstrip("/")
         self.fetch_avatar = fetch_avatar
+        self.channel_name = channel_name
         # guild id -> the payload last published for it.
         self._snapshots: dict[int, str] = {}
         # (guild id, user id) -> (avatar key, image bytes) last published.
@@ -202,7 +218,9 @@ class ScoreboardPublisher:
 
     async def _publish_guild(self, guild_id: int, name: str) -> None:
         tournament, tables = _top_submissions(self.store, guild_id)
-        snapshot = _snapshot(guild_id, name, tournament, tables)
+        snapshot = _snapshot(
+            guild_id, name, tournament, tables, self.channel_name(guild_id)
+        )
         payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
         # Avatars first, so a listener never holds a snapshot naming a picture
         # it hasn't been sent yet. Checked on every tick, not just on a change,
@@ -323,7 +341,16 @@ async def setup_scoreboard(
     async def fetch_avatar(url: str) -> bytes:
         return await bot.http.get_from_cdn(url)
 
-    publisher = ScoreboardPublisher(store, client, config.scoreboard_topic, fetch_avatar)
+    def channel_name(guild_id: int) -> str | None:
+        # From the cache only: this runs every second, and a channel the bot
+        # can't see just drops the "in #…" from the TV's hint.
+        channel_id = store.get_channel_id(guild_id)
+        channel = bot.get_channel(channel_id) if channel_id else None
+        return getattr(channel, "name", None)
+
+    publisher = ScoreboardPublisher(
+        store, client, config.scoreboard_topic, fetch_avatar, channel_name
+    )
 
     # paho calls these from its own network thread. publish() is thread-safe,
     # and republish() only reads what the event loop has finished writing.

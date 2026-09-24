@@ -228,7 +228,7 @@
     <h1 id="title">Pinball<span class="sub">high scores</span></h1>
     <div class="meta">
       <span id="clock"></span>
-      <span>Post a score in Discord with <b>/new</b></span>
+      <span id="hint">Post a score in Discord with <b>/new</b></span>
       <span class="status down" id="status"><span class="dot"></span><span id="status-text">connecting…</span></span>
     </div>
   </header>
@@ -240,6 +240,7 @@
 const grid = document.getElementById("grid");
 const title = document.getElementById("title");
 const clock = document.getElementById("clock");
+const hint = document.getElementById("hint");
 const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
 
@@ -317,6 +318,7 @@ function render() {
     el("span", "sub", t && !t.open ? "final standings" : "high scores"),
   );
   renderClock();
+  renderHint(board && board.channel);
 
   if (!board) return message("Waiting for scores…", "Connecting to the scoreboard");
   if (!board.tables.length) return message("No tables yet", "An admin can add them with /table add");
@@ -331,7 +333,8 @@ function render() {
   const next = new Map();
   const cards = tables.map((table) => {
     const card = el("section", "card");
-    card.style.setProperty("--accent", `hsl(${hue(table.name)} 85% 65%)`);
+    // The bot sends the colour /hs uses for this table; older bots didn't.
+    card.style.setProperty("--accent", table.color || `hsl(${hue(table.name)} 85% 65%)`);
     card.append(el("div", "table-name", table.name));
 
     const before = previous.get(table.id);
@@ -393,6 +396,12 @@ function fit() {
   }
 }
 window.addEventListener("resize", fit);
+
+function renderHint(channel) {
+  const parts = [document.createTextNode("Post a score in Discord with "), el("b", "", "/new")];
+  if (channel) parts.push(document.createTextNode(" in "), el("b", "", `#${channel}`));
+  hint.replaceChildren(...parts);
+}
 
 function renderStatus() {
   const brokerUp = !!(state && state.connected);
