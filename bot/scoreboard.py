@@ -119,7 +119,9 @@ def _snapshot(
     latest = _latest_per_player(tables)
     return {
         "v": 1,
-        "guild": {"id": guild_id, "name": guild_name},
+        # Discord IDs as strings: they exceed 2**53, and the TV page's
+        # JSON.parse would silently round them to someone else's ID.
+        "guild": {"id": str(guild_id), "name": guild_name},
         "tournament": (
             {
                 "name": tournament.name,
@@ -139,7 +141,7 @@ def _snapshot(
                     {
                         "score": s.score,
                         "player": s.user_display,
-                        "user_id": s.user_id,
+                        "user_id": str(s.user_id),
                         "avatar_key": avatar_key(latest[s.user_id]),
                         "at": s.created_at,
                     }

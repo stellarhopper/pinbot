@@ -62,7 +62,7 @@ class Board:
 
     def top(self, table_index: int = 0) -> list[tuple[int, int]]:
         return [
-            (e["user_id"], e["score"])
+            (int(e["user_id"]), e["score"])
             for e in self.snapshot()["tables"][table_index]["top"]
         ]
 
@@ -134,6 +134,17 @@ def test_guilds_never_see_each_other(store):
     theirs.submit(BOB, 999)
     assert ours.top() == [(ALICE, 100)]
     assert theirs.top() == [(BOB, 999)]
+
+
+def test_discord_ids_are_strings(store):
+    # A real snowflake is past 2**53; as a JSON number the page would round it
+    # and ask for the wrong avatar.
+    big = 197105676512788491
+    b = Board(store, GUILD)
+    b.submit(big, 100)
+    snap = b.snapshot()
+    assert snap["tables"][0]["top"][0]["user_id"] == str(big)
+    assert snap["guild"]["id"] == str(GUILD)
 
 
 def test_entry_carries_name_and_avatar_key(board):
@@ -235,7 +246,7 @@ async def test_new_score_and_void_each_publish(board, pub):
     await publisher.run_once(GUILDS)
     board.store.void_submission(GUILD, best.id, voided_by=ADMIN, reason="no")
     await publisher.run_once(GUILDS)
-    tops = [[e["user_id"] for e in s["tables"][0]["top"]] for s in client.snapshots()]
+    tops = [[int(e["user_id"]) for e in s["tables"][0]["top"]] for s in client.snapshots()]
     assert tops == [[ALICE], [BOB, ALICE], [ALICE]]
 
 
