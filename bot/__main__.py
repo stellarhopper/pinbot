@@ -9,9 +9,10 @@ import discord
 from discord.ext import commands
 
 from .admin import setup_admin
-from .config import Config, load_env_file
+from .config import ROOT, Config, load_env_file
 from .proofs import ProofURLCache
 from .review import setup_review
+from .scoreboard import setup_scoreboard
 from .scores import setup_scores
 from .store import Store
 from .tree import PinballTree
@@ -82,6 +83,7 @@ class PinballBot(commands.Bot):
         # the public flag and the ✅/❌ that resolves it.
         scores.review = await setup_review(self, self.store)
         await setup_admin(self, self.store, self.urls)
+        await setup_scoreboard(self, self.store, self.config)
         await self.sync_commands()
 
     async def sync_commands(self) -> None:
@@ -101,6 +103,9 @@ async def main() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     )
     load_env_file()
+    # The deployer's broker credentials, reused by the live scoreboard. Loaded
+    # second, so anything also set in .env wins.
+    load_env_file(ROOT / "deploy" / ".env.mqtt")
     config = Config()
     token = config.require_token()
     store = Store(config.db_path)

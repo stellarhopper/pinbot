@@ -10,7 +10,9 @@ description = "King-of-the-hill pinball tournament bot for Discord"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["discord.py>=2.4", "pillow>=10"]
+# paho-mqtt is core, not an extra, even though the scoreboard is optional: an
+# extra left off the Pi's install line fails silently, as [vision] once did.
+dependencies = ["discord.py>=2.4", "pillow>=10", "paho-mqtt>=1.6"]
 
 [project.optional-dependencies]
 # The photo/score cross-check. Absent this, the feature is simply unavailable

@@ -7,3 +7,4 @@ deploy/.env.mqtt
 data/
 .pytest_cache/
 *.egg-info/
+display/.env

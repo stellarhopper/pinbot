@@ -130,6 +130,20 @@ mosquitto_pub -h "$MQTT_BROKER" -p 8883 -t pinbot/deploy -m manual \
   -u "$MQTT_USERNAME" -P "$MQTT_PASSWORD" --capath /etc/ssl/certs/
 ```
 
+## The venue scoreboard
+
+The bot also publishes each server's top 3 per table to the same broker, for a
+TV at the venue. It reuses `deploy/.env.mqtt`, so there's nothing to set up on
+the Pi: if the deployer can connect, so can the scoreboard.
+
+- Boards go to `pinbot/scoreboard/<server id>`, and avatars to
+  `…/avatar/<user id>`. All are retained.
+- The bot checks every second and publishes only when something changed.
+- `grep scoreboard /var/log/pinbot/error.log` shows whether it connected.
+
+The venue side is `display/`. It uses its own subscribe-only login, never this
+one. See [`display/README.md`](../display/README.md).
+
 ## Backing up mid-event
 
 The database is one file and SQLite is running in WAL mode, so copy it with

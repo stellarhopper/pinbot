@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinball High Scores</title>
+<style>
+  :root {
+    --bg: #07080d;
+    --card: #11131c;
+    --card-edge: #1f2230;
+    --text: #f3f4f8;
+    --muted: #8a8fa3;
+    --gold: #ffcf4a;
+    --silver: #c9d1e0;
+    --bronze: #e0935a;
+    --live: #3ddc84;
+    --warn: #ffb020;
+    --flash: rgba(255, 207, 74, 0.28);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at top, #141729 0%, var(--bg) 60%);
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    cursor: none;
+    display: flex;
+    flex-direction: column;
+    padding: 1.6vmin 2vmin 2vmin;
+    gap: 1.6vmin;
+  }
+
+  /* ------------------------------------------------------------ header */
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2vmin;
+    flex: none;
+  }
+  h1 {
+    font-size: 4.6vmin;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  h1 .sub {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 0.55em;
+    margin-left: 0.6em;
+    letter-spacing: 0;
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 2.4vmin;
+    font-size: 2.2vmin;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .meta b { color: var(--text); font-weight: 700; }
+  .status { display: flex; align-items: center; gap: 0.8vmin; }
+  .dot {
+    width: 1.3vmin; height: 1.3vmin; border-radius: 50%;
+    background: var(--live);
+    box-shadow: 0 0 1vmin var(--live);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  .status.down .dot { background: var(--warn); box-shadow: 0 0 1vmin var(--warn); }
+  .status.down { color: var(--warn); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+
+  /* -------------------------------------------------------------- grid */
+  main {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    gap: 1.6vmin;
+  }
+  .card {
+    container-type: size;
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--card-edge);
+    border-top: 0.6vmin solid var(--accent);
+    border-radius: 1.4vmin;
+    padding: 5cqmin 6cqmin;
+    display: flex;
+    flex-direction: column;
+    gap: 3cqmin;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .table-name {
+    font-size: 9cqmin;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: none;
+  }
+
+  .king {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2cqmin;
+    flex: 1.3;
+    min-height: 0;
+    border-radius: 1vmin;
+    padding: 1cqmin 2cqmin;
+    margin: 0 -2cqmin;
+  }
+  .king .who { display: flex; align-items: center; gap: 3cqmin; min-width: 0; }
+  .king .avatar { width: 15cqmin; height: 15cqmin; font-size: 6cqmin; border: 0.8cqmin solid var(--gold); }
+  .king .name {
+    font-size: 8cqmin;
+    font-weight: 700;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .king .crown { font-size: 7cqmin; flex: none; }
+  .king .score {
+    /* Starting size; fit() shrinks it until the digits fit the card. */
+    font-size: 19cqmin;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--gold);
+    white-space: nowrap;
+  }
+
+  .chasers { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; gap: 2cqmin; min-height: 0; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 3.5cqmin;
+    font-size: 6.2cqmin;
+    border-radius: 0.8vmin;
+    padding: 0.5cqmin 1cqmin;
+    margin: 0 -1cqmin;
+  }
+  .rank { width: 6cqmin; font-weight: 800; flex: none; text-align: center; }
+  .row.r2 .rank { color: var(--silver); }
+  .row.r3 .rank { color: var(--bronze); }
+  .row .avatar { width: 11cqmin; height: 11cqmin; font-size: 4.5cqmin; }
+  .row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #d6d9e4; }
+  .row .score { font-weight: 700; white-space: nowrap; }
+
+  .avatar {
+    flex: none;
+    border-radius: 50%;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    color: #fff;
+    background: var(--tint, #333);
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .open {
+    flex: 1;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    color: var(--muted);
+  }
+  .open strong { display: block; font-size: 13cqmin; color: var(--text); font-weight: 800; }
+  .open span { font-size: 6cqmin; }
+
+  /* ------------------------------------------------------------ change */
+  .flash { animation: flash 2.6s ease-out 3; }
+  @keyframes flash { 0% { background: var(--flash); } 100% { background: transparent; } }
+
+  .card.crowned { animation: glow 1.4s ease-in-out 5; }
+  @keyframes glow {
+    50% { box-shadow: 0 0 5vmin rgba(255, 207, 74, 0.55); border-color: var(--gold); }
+  }
+  .ribbon {
+    position: absolute;
+    top: 5cqmin; right: -1px;
+    background: var(--gold);
+    color: #1a1300;
+    font-weight: 900;
+    font-size: 5cqmin;
+    letter-spacing: 0.06em;
+    padding: 1.2cqmin 3cqmin 1.2cqmin 4cqmin;
+    border-radius: 1vmin 0 0 1vmin;
+    animation: ribbon 9s ease forwards;
+  }
+  @keyframes ribbon {
+    0% { transform: translateX(110%); }
+    6%, 88% { transform: translateX(0); }
+    100% { transform: translateX(110%); }
+  }
+
+  /* ----------------------------------------------------------- message */
+  .message {
+    flex: 1;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    gap: 2vmin;
+  }
+  .message strong { font-size: 7vmin; font-weight: 800; }
+  .message span { font-size: 3vmin; color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flash, .card.crowned, .ribbon, .dot { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Pinball<span class="sub">high scores</span></h1>
+    <div class="meta">
+      <span id="clock"></span>
+      <span>Post a score in Discord with <b>/new</b></span>
+      <span class="status down" id="status"><span class="dot"></span><span id="status-text">connecting…</span></span>
+    </div>
+  </header>
+  <main id="grid"></main>
+
+<script>
+"use strict";
+
+const grid = document.getElementById("grid");
+const title = document.getElementById("title");
+const clock = document.getElementById("clock");
+const statusEl = document.getElementById("status");
+const statusText = document.getElementById("status-text");
+
+let state = null;          // last payload from /events
+let streamUp = false;      // this page <-> the listener
+let previous = new Map();  // table id -> entries last shown, to spot changes
+
+const fmt = new Intl.NumberFormat("en-US");
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  // textContent, never innerHTML: player and table names are typed by people.
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function hue(seed) {
+  let h = 0;
+  for (const ch of String(seed)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 360;
+}
+
+function initials(name) {
+  const words = String(name).trim().split(/\s+/).filter(Boolean);
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2);
+  return letters.toUpperCase();
+}
+
+function avatar(entry) {
+  const box = el("div", "avatar");
+  box.style.setProperty("--tint", `hsl(${hue(entry.user_id)} 45% 35%)`);
+  const fallback = () => { box.replaceChildren(el("span", "", initials(entry.player))); };
+  if (entry.avatar_key) {
+    const img = el("img");
+    img.alt = "";
+    img.onerror = fallback;
+    img.src = `/avatar/${entry.user_id}?k=${encodeURIComponent(entry.avatar_key)}`;
+    box.append(img);
+  } else {
+    fallback();
+  }
+  return box;
+}
+
+// Identifies one posted score, so a re-render can tell what is new.
+const scoreId = (e) => `${e.user_id}:${e.score}:${e.at}`;
+
+function columnsFor(n) {
+  if (n <= 3) return Math.max(n, 1);
+  if (n === 4) return 2;
+  if (n <= 6) return 3;
+  if (n <= 8) return 4;
+  if (n === 9) return 3;
+  if (n <= 12) return 4;
+  if (n <= 15) return 5;
+  return Math.ceil(Math.sqrt(n * 1.6));
+}
+
+function message(big, small) {
+  const box = el("div", "message");
+  box.append(el("strong", "", big));
+  if (small) box.append(el("span", "", small));
+  grid.replaceChildren(box);
+  grid.style.gridTemplateColumns = "1fr";
+  grid.style.gridTemplateRows = "1fr";
+}
+
+function render() {
+  renderStatus();
+  const board = state && state.board;
+  const t = board && board.tournament;
+  title.replaceChildren(
+    document.createTextNode(t && t.name ? t.name : "Pinball"),
+    el("span", "sub", t && !t.open ? "final standings" : "high scores"),
+  );
+  renderClock();
+
+  if (!board) return message("Waiting for scores…", "Connecting to the scoreboard");
+  if (!board.tables.length) return message("No tables yet", "An admin can add them with /table add");
+  if (!t) return message("No tournament yet", "An admin can start one with /tournament start");
+
+  const tables = board.tables;
+  const cols = columnsFor(tables.length);
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${Math.ceil(tables.length / cols)}, minmax(0, 1fr))`;
+
+  const firstPaint = previous.size === 0;
+  const next = new Map();
+  const cards = tables.map((table) => {
+    const card = el("section", "card");
+    card.style.setProperty("--accent", `hsl(${hue(table.name)} 85% 65%)`);
+    card.append(el("div", "table-name", table.name));
+
+    const before = previous.get(table.id);
+    const seen = new Set((before || []).map(scoreId));
+    const isNew = (e) => !firstPaint && before !== undefined && !seen.has(scoreId(e));
+    next.set(table.id, table.top);
+
+    const [king, ...chasers] = table.top;
+    if (!king) {
+      const open = el("div", "open");
+      open.append(el("strong", "", "Wide open"), el("span", "", "First score takes the crown"));
+      card.append(open);
+      return card;
+    }
+
+    const top = el("div", "king");
+    const who = el("div", "who");
+    who.append(avatar(king), el("span", "crown", "\u{1F451}"), el("span", "name", king.player));
+    top.append(who, el("div", "score", fmt.format(king.score)));
+    card.append(top);
+
+    if (isNew(king)) {
+      top.classList.add("flash");
+      card.classList.add("crowned");
+      card.append(el("div", "ribbon", "NEW HIGH SCORE"));
+    }
+
+    const list = el("div", "chasers");
+    chasers.forEach((e, i) => {
+      const row = el("div", `row r${i + 2}`);
+      row.append(
+        el("span", "rank", String(i + 2)),
+        avatar(e),
+        el("span", "name", e.player),
+        el("span", "score", fmt.format(e.score)),
+      );
+      if (isNew(e)) row.classList.add("flash");
+      list.append(row);
+    });
+    card.append(list);
+    return card;
+  });
+  previous = next;
+  grid.replaceChildren(...cards);
+  fit();
+}
+
+// Shrink each #1 score until it fits its card. Ten-digit pinball scores are
+// normal, and a fixed size either overflows or wastes a big card.
+function fit() {
+  for (const score of grid.querySelectorAll(".king .score")) {
+    score.style.fontSize = "";
+    const room = score.parentElement.clientWidth;
+    let size = parseFloat(getComputedStyle(score).fontSize);
+    while (score.scrollWidth > room && size > 8) {
+      size *= 0.94;
+      score.style.fontSize = `${size}px`;
+    }
+  }
+}
+window.addEventListener("resize", fit);
+
+function renderStatus() {
+  const brokerUp = !!(state && state.connected);
+  const up = streamUp && brokerUp;
+  statusEl.classList.toggle("down", !up);
+  statusText.textContent = up ? "live" : "reconnecting…";
+}
+
+function renderClock() {
+  const t = state && state.board && state.board.tournament;
+  if (!t || !t.open || !t.ends_at) { clock.textContent = ""; return; }
+  const left = Math.max(0, t.ends_at - Date.now() / 1000);
+  const h = Math.floor(left / 3600);
+  const m = Math.floor((left % 3600) / 60);
+  const s = Math.floor(left % 60);
+  const pad = (n) => String(n).padStart(2, "0");
+  clock.replaceChildren(
+    document.createTextNode("ends in "),
+    el("b", "", h ? `${h}h ${pad(m)}m` : `${m}:${pad(s)}`),
+  );
+}
+
+function connect() {
+  const events = new EventSource("/events");
+  events.onopen = () => { streamUp = true; renderStatus(); };
+  events.onmessage = (msg) => {
+    streamUp = true;
+    const incoming = JSON.parse(msg.data);
+    // A listener that just restarted has no board until the broker replays
+    // it; keep showing the last one rather than blanking the TV.
+    if (!incoming.board && state && state.board) incoming.board = state.board;
+    const boardChanged = !state || JSON.stringify(incoming.board) !== JSON.stringify(state.board);
+    state = incoming;
+    if (boardChanged) render(); else renderStatus();
+  };
+  // EventSource retries by itself; the last board stays on screen meanwhile.
+  events.onerror = () => { streamUp = false; renderStatus(); };
+}
+
+setInterval(renderClock, 1000);
+render();
+connect();
+</script>
+</body>
+</html>

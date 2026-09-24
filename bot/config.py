@@ -1,7 +1,8 @@
 """Process-level configuration.
 
-Only three things live here: the bot token, an optional dev guild for fast
-command sync, and the database path. Everything a tournament organizer might
+Only a few things live here: the bot token, an optional dev guild for fast
+command sync, the database path, and the broker the live scoreboard publishes
+to. Everything a tournament organizer might
 want to change — tables, channel, admin roles, tournament state — lives in the
 database per guild and is set through slash commands, so the bot can be added
 to a server and run without anyone editing files on disk.
@@ -56,6 +57,16 @@ class Config:
         raw_db = os.environ.get("DB_PATH", "").strip()
         self.db_path = Path(raw_db) if raw_db else ROOT / "data" / "pinball.db"
         self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip() or None
+        # The live scoreboard. On the Pi these come from deploy/.env.mqtt, the
+        # deployer's own credentials, so the TV costs no new secret at home.
+        # MQTT_TOPIC in that file is the deploy trigger's, hence a separate name.
+        self.mqtt_broker = os.environ.get("MQTT_BROKER", "").strip() or None
+        self.mqtt_port = _optional_int("MQTT_PORT") or 8883
+        self.mqtt_username = os.environ.get("MQTT_USERNAME", "").strip()
+        self.mqtt_password = os.environ.get("MQTT_PASSWORD", "").strip()
+        self.scoreboard_topic = (
+            os.environ.get("SCOREBOARD_TOPIC", "").strip() or "pinbot/scoreboard"
+        )
 
     def require_token(self) -> str:
         if not self.token:
