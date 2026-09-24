@@ -138,7 +138,6 @@
     font-weight: 900;
     line-height: 1;
     letter-spacing: -0.02em;
-    color: var(--gold);
     white-space: nowrap;
   }
 
@@ -225,7 +224,7 @@
 </head>
 <body>
   <header>
-    <h1 id="title">Pinball<span class="sub">high scores</span></h1>
+    <h1 id="title">Pinball Scoreboard</h1>
     <div class="meta">
       <span id="clock"></span>
       <span id="hint">Post a score in Discord with <b>/new</b></span>
@@ -313,10 +312,9 @@ function render() {
   renderStatus();
   const board = state && state.board;
   const t = board && board.tournament;
-  title.replaceChildren(
-    document.createTextNode(t && t.name ? t.name : "Pinball"),
-    el("span", "sub", t && !t.open ? "final standings" : "high scores"),
-  );
+  const sub = [t && t.name, t && !t.open && "final standings"].filter(Boolean).join(" · ");
+  title.replaceChildren(document.createTextNode("Pinball Scoreboard"));
+  if (sub) title.append(el("span", "sub", sub));
   renderClock();
   renderHint(board && board.channel);
 
