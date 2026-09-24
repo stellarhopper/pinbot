@@ -5,23 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pinball High Scores</title>
 <style>
+  /* LANfest Colorado brand colours. The table stripes are the exception:
+     they come from the bot and match /hs, so the TV agrees with Discord. */
   :root {
-    --bg: #07080d;
-    --card: #11131c;
-    --card-edge: #1f2230;
-    --text: #f3f4f8;
-    --muted: #8a8fa3;
-    --gold: #ffcf4a;
-    --silver: #c9d1e0;
-    --bronze: #e0935a;
-    --live: #3ddc84;
-    --warn: #ffb020;
-    --flash: rgba(255, 207, 74, 0.28);
+    --lfco-dk-blue: #001d2b;
+    --lfco-main-blue: #002b40;
+    --lfco-light-blue: #004465;
+    --lfco-cyan: #29abe2;
+    --lfco-orange: #f58a26;
+
+    --bg: var(--lfco-dk-blue);
+    --bg-glow: var(--lfco-light-blue);
+    --card: var(--lfco-main-blue);
+    --card-edge: var(--lfco-light-blue);
+    --text: #f4f8fb;
+    --text-soft: #cfe0ea;
+    --muted: #8fb4c8;
+    --highlight: var(--lfco-orange);
+    --on-highlight: var(--lfco-dk-blue);
+    --rank-2: var(--lfco-cyan);
+    --rank-3: var(--lfco-orange);
+    --live: var(--lfco-cyan);
+    --warn: var(--lfco-orange);
+    --flash: rgba(245, 138, 38, 0.3);
+    --glow: rgba(245, 138, 38, 0.55);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
-    background: radial-gradient(ellipse at top, #141729 0%, var(--bg) 60%);
+    background: radial-gradient(ellipse at top, var(--bg-glow) 0%, var(--bg) 65%);
     background-color: var(--bg);
     color: var(--text);
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -124,7 +136,7 @@
     margin: 0 -2cqmin;
   }
   .king .who { display: flex; align-items: center; gap: 3cqmin; min-width: 0; }
-  .king .avatar { width: 15cqmin; height: 15cqmin; font-size: 6cqmin; border: 0.8cqmin solid var(--gold); }
+  .king .avatar { width: 15cqmin; height: 15cqmin; font-size: 6cqmin; border: 0.8cqmin solid var(--highlight); }
   .king .name {
     font-size: 8cqmin;
     font-weight: 700;
@@ -154,10 +166,10 @@
     margin: 0 -1cqmin;
   }
   .rank { width: 6cqmin; font-weight: 800; flex: none; text-align: center; }
-  .row.r2 .rank { color: var(--silver); }
-  .row.r3 .rank { color: var(--bronze); }
+  .row.r2 .rank { color: var(--rank-2); }
+  .row.r3 .rank { color: var(--rank-3); }
   .row .avatar { width: 11cqmin; height: 11cqmin; font-size: 4.5cqmin; }
-  .row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #d6d9e4; }
+  .row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-soft); }
   .row .score { font-weight: 700; white-space: nowrap; }
 
   .avatar {
@@ -188,13 +200,13 @@
 
   .card.crowned { animation: glow 1.4s ease-in-out 5; }
   @keyframes glow {
-    50% { box-shadow: 0 0 5vmin rgba(255, 207, 74, 0.55); border-color: var(--gold); }
+    50% { box-shadow: 0 0 5vmin var(--glow); border-color: var(--highlight); }
   }
   .ribbon {
     position: absolute;
     top: 5cqmin; right: -1px;
-    background: var(--gold);
-    color: #1a1300;
+    background: var(--highlight);
+    color: var(--on-highlight);
     font-weight: 900;
     font-size: 5cqmin;
     letter-spacing: 0.06em;
