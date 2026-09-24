@@ -27,7 +27,6 @@
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     font-variant-numeric: tabular-nums;
     overflow: hidden;
-    cursor: none;
     display: flex;
     flex-direction: column;
     padding: 1.6vmin 2vmin 2vmin;
@@ -76,6 +75,9 @@
   .status.down .dot { background: var(--warn); box-shadow: 0 0 1vmin var(--warn); }
   .status.down { color: var(--warn); }
   @keyframes pulse { 50% { opacity: 0.35; } }
+
+  /* Set after a few idle seconds, so the pointer doesn't sit over the scores. */
+  body.idle, body.idle * { cursor: none; }
 
   /* -------------------------------------------------------------- grid */
   main {
@@ -438,6 +440,20 @@ function connect() {
   // EventSource retries by itself; the last board stays on screen meanwhile.
   events.onerror = () => { streamUp = false; renderStatus(); };
 }
+
+// Hide the pointer once the mouse has been still for a few seconds; any
+// movement brings it back.
+const IDLE_MS = 3000;
+let idleTimer = 0;
+function wake() {
+  document.body.classList.remove("idle");
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => document.body.classList.add("idle"), IDLE_MS);
+}
+for (const type of ["mousemove", "mousedown", "wheel", "touchstart"]) {
+  window.addEventListener(type, wake, { passive: true });
+}
+wake();
 
 setInterval(renderClock, 1000);
 render();
