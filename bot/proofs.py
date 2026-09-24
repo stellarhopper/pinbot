@@ -21,18 +21,25 @@ Raspberry Pi and nothing may accumulate there.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import time
 
 import discord
+from PIL import Image, ImageOps
 
 log = logging.getLogger(__name__)
 
-# Phone photos routinely run past 10 MB. The bot re-posts the photo, though, so
-# the real ceiling is also whatever the server lets the bot upload — see
-# upload_limit().
+# Phone photos routinely run past 10 MB. This caps what the bot will download;
+# what it posts is also bounded by the server's own upload limit, and a photo
+# over that is shrunk to fit — see fit_for_upload().
 MAX_PROOF_BYTES = 25 * 1024 * 1024
+
+# Long edges to try, largest first, when a photo is too big for the server to
+# take. 4000 px keeps a zoomed-in display sharp for whoever reviews the proof;
+# the smaller steps exist only for a photo still too heavy after the first.
+_UPLOAD_EDGES = (4000, 3000, 2000)
 
 _EXT_BY_CONTENT_TYPE = {
     "image/jpeg": ".jpg",
@@ -50,33 +57,76 @@ class ProofError(Exception):
 
 
 def upload_limit(channel: object) -> int:
-    """The biggest proof photo the bot can re-post into ``channel``.
+    """The biggest file the bot can post into ``channel``.
 
-    A player with Nitro can attach a photo larger than the server lets the bot
-    upload. Refusing it up front beats accepting it and then failing the
-    re-post with an error that blames permissions.
+    10 MB on a server without boosts, and a player with Nitro can attach far
+    more than that. Posting it as-is fails, and the failure reads as a
+    permissions problem.
     """
     guild = getattr(channel, "guild", None)
     if guild is None:
         return MAX_PROOF_BYTES
-    return min(MAX_PROOF_BYTES, guild.filesize_limit)
+    return guild.filesize_limit
 
 
-def validate(attachment: discord.Attachment, limit: int = MAX_PROOF_BYTES) -> None:
+def validate(attachment: discord.Attachment) -> None:
     content_type = (attachment.content_type or "").split(";")[0].strip().lower()
     if not content_type.startswith("image/"):
         raise ProofError(
             "That attachment isn't an image. Attach a photo of the score screen."
         )
-    if attachment.size > limit:
-        why = (
-            "" if limit >= MAX_PROOF_BYTES
-            else " — that's as big as this server lets me post"
-        )
+    if attachment.size > MAX_PROOF_BYTES:
         raise ProofError(
             f"That photo is {attachment.size / 1_048_576:.1f} MB. "
-            f"Keep it under {limit // 1_048_576} MB{why}."
+            f"Keep it under {MAX_PROOF_BYTES // 1_048_576} MB."
         )
+
+
+def render_jpeg(data: bytes, long_edge: int) -> bytes:
+    """Re-render a photo as an upright JPEG no more than ``long_edge`` px long.
+
+    In memory only — nothing touches disk. Raises whatever Pillow raises for
+    bytes it can't read (HEIC, for one, without a plugin).
+    """
+    with Image.open(io.BytesIO(data)) as image:
+        scale = long_edge / max(image.size)
+        if scale < 1:
+            # For a JPEG, decode straight at 1/2, 1/4 or 1/8 scale: a full
+            # 48 MP decode is ~150 MB, which a Pi should not be asked for. A
+            # no-op for other formats.
+            image.draft(
+                "RGB",
+                (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+            )
+        # Phones store "rotate me" in EXIF rather than rotating the pixels, and
+        # the re-encode drops EXIF — so bake the rotation in or it turns sideways.
+        upright = ImageOps.exif_transpose(image).convert("RGB")
+    upright.thumbnail((long_edge, long_edge))
+    out = io.BytesIO()
+    upright.save(out, "JPEG", quality=90)
+    return out.getvalue()
+
+
+def fit_for_upload(data: bytes, limit: int) -> bytes:
+    """Shrink a photo until the server will take it. Raises ProofError if not."""
+    try:
+        for edge in _UPLOAD_EDGES:
+            shrunk = render_jpeg(data, edge)
+            if len(shrunk) <= limit:
+                log.info(
+                    "shrank a %.1f MB proof photo to %.1f MB (%d px) to fit a "
+                    "%.0f MB upload limit",
+                    len(data) / 1_048_576, len(shrunk) / 1_048_576, edge,
+                    limit / 1_048_576,
+                )
+                return shrunk
+    except Exception:  # noqa: BLE001 - any failure here means "can't shrink it"
+        log.warning("couldn't shrink a %d-byte proof photo", len(data), exc_info=True)
+    raise ProofError(
+        f"That photo is {len(data) / 1_048_576:.1f} MB, more than this server "
+        f"lets me post ({limit // 1_048_576} MB), and I couldn't shrink it. "
+        "Try a screenshot of it instead."
+    )
 
 
 def proof_filename(attachment: discord.Attachment) -> str:
@@ -99,16 +149,25 @@ def proof_filename(attachment: discord.Attachment) -> str:
 
 async def read_proof(
     attachment: discord.Attachment, limit: int = MAX_PROOF_BYTES
-) -> tuple[bytes, str]:
-    """Validate and read an attachment into memory. Returns (bytes, filename)."""
-    validate(attachment, limit)
+) -> tuple[bytes, str, str | None]:
+    """Validate and read an attachment into memory, shrunk to fit ``limit``.
+
+    Returns (bytes, filename, vision media type). The last two describe the
+    bytes actually returned, which after a shrink are a JPEG whatever was sent.
+    """
+    validate(attachment)
     try:
         data = await attachment.read()
     except discord.HTTPException as exc:
         raise ProofError(
             "Discord wouldn't give me that photo. Try submitting again."
         ) from exc
-    return data, proof_filename(attachment)
+    if len(data) <= limit:
+        return data, proof_filename(attachment), vision_media_type(attachment)
+    # Decoding a phone photo is a few hundred ms of CPU on a Pi; off the event
+    # loop, so the gateway heartbeat doesn't wait on it.
+    data = await asyncio.to_thread(fit_for_upload, data, limit)
+    return data, "proof.jpg", "image/jpeg"
 
 
 def as_file(data: bytes, filename: str) -> discord.File:

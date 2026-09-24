@@ -7,12 +7,14 @@ run lived here rather than in store.py.
 
 from __future__ import annotations
 
+import io
 import logging
 import types
 
 import pytest
+from PIL import Image
 
-from bot.proofs import ProofURLCache
+from bot.proofs import ProofURLCache, read_proof
 
 from fakes import (
     ALICE,
@@ -230,28 +232,62 @@ async def test_bad_photos_are_refused(tmp_path, monkeypatch, proof, expected):
     h.close()
 
 
-async def test_a_phone_sized_photo_is_accepted(tmp_path, monkeypatch):
+def big_jpeg() -> bytes:
+    """A 50 MP phone photo's dimensions. Solid white, so it stays small on disk
+    and a test lowers the server's limit below it rather than building 15 MB."""
+    out = io.BytesIO()
+    Image.new("RGB", (8160, 6120), "white").save(out, "JPEG")
+    return out.getvalue()
+
+
+async def test_a_phone_sized_photo_is_posted_as_is_when_the_server_takes_it(
+    tmp_path, monkeypatch
+):
     """Phone cameras routinely produce photos over the old 10 MB cap."""
     h = await Harness.create(tmp_path, monkeypatch)
     h.channel.guild = types.SimpleNamespace(filesize_limit=50 * 1024 * 1024)
-    proof = FakeAttachment(data=b"x" * (15 * 1024 * 1024))
-    itx = await h.submit("Godzilla", "1,000,000", proof=proof)
+    photo = b"x" * (15 * 1024 * 1024)
+    itx = await h.submit("Godzilla", "1,000,000", proof=FakeAttachment(data=photo))
     assert "Recorded" in itx.reply
-    assert len(h.channel.sent) == 1
+    assert h.channel.last.file.fp.getvalue() == photo
     h.close()
 
 
-async def test_a_photo_the_server_wont_let_me_repost_is_refused_up_front(
+async def test_a_photo_too_big_for_the_server_is_shrunk_to_fit(tmp_path, monkeypatch):
+    """An unboosted server lets the bot post only 10 MB. The player shouldn't
+    have to know that, or resize anything themselves."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    photo = big_jpeg()
+    h.channel.guild = types.SimpleNamespace(filesize_limit=len(photo) - 1)
+    itx = await h.submit(
+        "Godzilla", "1,000,000", proof=FakeAttachment(data=photo, content_type="image/png")
+    )
+    assert "Recorded" in itx.reply
+    posted = h.channel.last.file
+    assert posted.filename == "proof.jpg", "the bytes are a JPEG now, whatever was sent"
+    with Image.open(posted.fp) as image:
+        assert image.format == "JPEG"
+        assert image.size == (4000, 3000)
+    h.close()
+
+
+async def test_the_photo_check_is_told_the_shrunk_bytes_are_a_jpeg():
+    photo = big_jpeg()
+    proof = FakeAttachment(data=photo, content_type="image/png")
+    _, filename, media_type = await read_proof(proof, len(photo) - 1)
+    assert (filename, media_type) == ("proof.jpg", "image/jpeg")
+
+
+async def test_a_photo_too_big_to_post_that_cant_be_shrunk_is_refused(
     tmp_path, monkeypatch
 ):
-    """A Nitro player can attach more than an unboosted server lets the bot
-    upload. Refusing it here beats failing the re-post and blaming permissions."""
+    """HEIC, say, which Pillow can't read. Refused up front: posting it would
+    fail with an error that blames permissions."""
     h = await Harness.create(tmp_path, monkeypatch)
     h.channel.guild = types.SimpleNamespace(filesize_limit=10 * 1024 * 1024)
-    proof = FakeAttachment(data=b"x" * (15 * 1024 * 1024))
+    proof = FakeAttachment(data=b"x" * (15 * 1024 * 1024), content_type="image/heic")
     itx = await h.submit("Godzilla", "1,000,000", proof=proof)
-    assert "under 10 MB" in itx.reply
-    assert "as big as this server lets me post" in itx.reply
+    assert "more than this server lets me post (10 MB)" in itx.reply
     assert h.channel.sent == []
     h.close()
 

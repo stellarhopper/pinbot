@@ -14,6 +14,7 @@ import sys
 import types
 
 import pytest
+from PIL import Image
 
 from bot import vision
 
@@ -181,8 +182,6 @@ async def test_the_request_sends_the_image_and_asks_for_low_effort(anthropic_dou
 # -------------------------------------------------------- oversized photos
 
 def jpeg(width: int, height: int, *, orientation: int | None = None) -> bytes:
-    from PIL import Image
-
     out = io.BytesIO()
     exif = Image.Exif()
     if orientation is not None:
@@ -192,8 +191,6 @@ def jpeg(width: int, height: int, *, orientation: int | None = None) -> bytes:
 
 
 def dimensions(data: bytes) -> tuple[int, int]:
-    from PIL import Image
-
     with Image.open(io.BytesIO(data)) as image:
         return image.size
 

@@ -66,6 +66,7 @@ class FakeMessage:
         # (tournament names, notes, nicknames) reaches these messages.
         self.allowed_mentions = allowed_mentions
         self.embeds = [embed] if embed else list(embeds or [])
+        self.file = file  # what was uploaded, so a test can inspect the bytes
         self.attachments = []
         if file is not None:
             # Shaped like a real attachment URL: signed, and therefore expiring.

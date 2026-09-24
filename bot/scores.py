@@ -162,7 +162,9 @@ class ScoresCog(commands.Cog):
             return
 
         try:
-            data, filename = await proofs.read_proof(proof, proofs.upload_limit(channel))
+            data, filename, media_type = await proofs.read_proof(
+                proof, proofs.upload_limit(channel)
+            )
         except proofs.ProofError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -197,7 +199,7 @@ class ScoresCog(commands.Cog):
                     submission=submission,
                     machine=machine,
                     data=data,
-                    media_type=proofs.vision_media_type(proof),
+                    media_type=media_type,
                 )
             finally:
                 del data  # release the image bytes promptly

@@ -30,6 +30,10 @@ import logging
 import os
 from dataclasses import dataclass
 
+from PIL import Image
+
+from . import proofs
+
 log = logging.getLogger(__name__)
 
 MODEL = "claude-opus-5"
@@ -133,40 +137,22 @@ def fit_for_api(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
 
     Only a photo that would be refused is re-rendered. Re-encoding is lossy, and
     a second JPEG pass is exactly what smears a segment display, so a photo the
-    API will take as-is goes as-is. Runs in memory only — nothing touches disk.
+    API will take as-is goes as-is.
     """
-    fits = 4 * -(-len(image_bytes) // 3) <= _MAX_ENCODED_BYTES
     try:
-        from PIL import Image, ImageOps
-    except ImportError:
-        if not fits:
-            log.warning("Pillow isn't installed, so a large photo can't be shrunk")
-        return image_bytes, media_type
-
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            size = image.size
     except Exception:  # noqa: BLE001 - not ours to judge; let the API say no
         return image_bytes, media_type
-    with image:
-        original = image.size
-        if fits and max(original) <= _MAX_SIDE:
-            return image_bytes, media_type
-        # For a JPEG, decode straight at 1/2, 1/4 or 1/8 scale: a full 48 MP
-        # decode is ~150 MB, which a Pi should not be asked for. A no-op for
-        # other formats.
-        image.draft("RGB", (_TARGET_SIDE, _TARGET_SIDE))
-        # Phones store "rotate me" in EXIF rather than rotating the pixels, and
-        # the re-encode drops EXIF — so bake the rotation in or send it sideways.
-        upright = ImageOps.exif_transpose(image).convert("RGB")
-    upright.thumbnail((_TARGET_SIDE, _TARGET_SIDE))
-    out = io.BytesIO()
-    upright.save(out, "JPEG", quality=90)
+    fits = 4 * -(-len(image_bytes) // 3) <= _MAX_ENCODED_BYTES
+    if fits and max(size) <= _MAX_SIDE:
+        return image_bytes, media_type
+    shrunk = proofs.render_jpeg(image_bytes, _TARGET_SIDE)
     log.info(
-        "shrank a %.1f MB %dx%d photo to %.1f MB %dx%d for the photo check",
-        len(image_bytes) / 1_048_576, *original,
-        out.tell() / 1_048_576, *upright.size,
+        "shrank a %.1f MB %dx%d photo to %.1f MB for the photo check",
+        len(image_bytes) / 1_048_576, *size, len(shrunk) / 1_048_576,
     )
-    return out.getvalue(), "image/jpeg"
+    return shrunk, "image/jpeg"
 
 
 def is_available() -> bool:
