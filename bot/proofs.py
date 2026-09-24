@@ -29,7 +29,10 @@ import discord
 
 log = logging.getLogger(__name__)
 
-MAX_PROOF_BYTES = 10 * 1024 * 1024
+# Phone photos routinely run past 10 MB. The bot re-posts the photo, though, so
+# the real ceiling is also whatever the server lets the bot upload — see
+# upload_limit().
+MAX_PROOF_BYTES = 25 * 1024 * 1024
 
 _EXT_BY_CONTENT_TYPE = {
     "image/jpeg": ".jpg",
@@ -46,16 +49,33 @@ class ProofError(Exception):
     """A user-facing problem with the submitted photo."""
 
 
-def validate(attachment: discord.Attachment) -> None:
+def upload_limit(channel: object) -> int:
+    """The biggest proof photo the bot can re-post into ``channel``.
+
+    A player with Nitro can attach a photo larger than the server lets the bot
+    upload. Refusing it up front beats accepting it and then failing the
+    re-post with an error that blames permissions.
+    """
+    guild = getattr(channel, "guild", None)
+    if guild is None:
+        return MAX_PROOF_BYTES
+    return min(MAX_PROOF_BYTES, guild.filesize_limit)
+
+
+def validate(attachment: discord.Attachment, limit: int = MAX_PROOF_BYTES) -> None:
     content_type = (attachment.content_type or "").split(";")[0].strip().lower()
     if not content_type.startswith("image/"):
         raise ProofError(
             "That attachment isn't an image. Attach a photo of the score screen."
         )
-    if attachment.size > MAX_PROOF_BYTES:
+    if attachment.size > limit:
+        why = (
+            "" if limit >= MAX_PROOF_BYTES
+            else " — that's as big as this server lets me post"
+        )
         raise ProofError(
             f"That photo is {attachment.size / 1_048_576:.1f} MB. "
-            f"Keep it under {MAX_PROOF_BYTES // 1_048_576} MB."
+            f"Keep it under {limit // 1_048_576} MB{why}."
         )
 
 
@@ -77,9 +97,11 @@ def proof_filename(attachment: discord.Attachment) -> str:
     return f"proof{ext or '.png'}"
 
 
-async def read_proof(attachment: discord.Attachment) -> tuple[bytes, str]:
+async def read_proof(
+    attachment: discord.Attachment, limit: int = MAX_PROOF_BYTES
+) -> tuple[bytes, str]:
     """Validate and read an attachment into memory. Returns (bytes, filename)."""
-    validate(attachment)
+    validate(attachment, limit)
     try:
         data = await attachment.read()
     except discord.HTTPException as exc:

@@ -21,8 +21,10 @@ either, :func:`is_available` is False and ``/config vision on`` refuses.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib.util
+import io
 import json
 import logging
 import os
@@ -31,6 +33,15 @@ from dataclasses import dataclass
 log = logging.getLogger(__name__)
 
 MODEL = "claude-opus-5"
+
+# What the API takes per image: 10 MB *after* base64, which inflates by 4/3, and
+# no side over 8000 px. A phone can exceed both — a 25 MB proof photo, or a
+# 50 MP sensor's 8160 px — and the API refuses those outright.
+_MAX_ENCODED_BYTES = 10_000_000
+_MAX_SIDE = 8000
+# The model reads at most this many pixels on the long edge and downscales
+# anything larger itself, so shrinking to it costs nothing the model would see.
+_TARGET_SIDE = 2576
 
 _SCHEMA = {
     "type": "object",
@@ -117,6 +128,47 @@ def _why(exc: Exception) -> str:
     return f"{type(exc).__name__}"
 
 
+def fit_for_api(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
+    """Shrink a photo the API would refuse; pass anything else through untouched.
+
+    Only a photo that would be refused is re-rendered. Re-encoding is lossy, and
+    a second JPEG pass is exactly what smears a segment display, so a photo the
+    API will take as-is goes as-is. Runs in memory only — nothing touches disk.
+    """
+    fits = 4 * -(-len(image_bytes) // 3) <= _MAX_ENCODED_BYTES
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        if not fits:
+            log.warning("Pillow isn't installed, so a large photo can't be shrunk")
+        return image_bytes, media_type
+
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+    except Exception:  # noqa: BLE001 - not ours to judge; let the API say no
+        return image_bytes, media_type
+    with image:
+        original = image.size
+        if fits and max(original) <= _MAX_SIDE:
+            return image_bytes, media_type
+        # For a JPEG, decode straight at 1/2, 1/4 or 1/8 scale: a full 48 MP
+        # decode is ~150 MB, which a Pi should not be asked for. A no-op for
+        # other formats.
+        image.draft("RGB", (_TARGET_SIDE, _TARGET_SIDE))
+        # Phones store "rotate me" in EXIF rather than rotating the pixels, and
+        # the re-encode drops EXIF — so bake the rotation in or send it sideways.
+        upright = ImageOps.exif_transpose(image).convert("RGB")
+    upright.thumbnail((_TARGET_SIDE, _TARGET_SIDE))
+    out = io.BytesIO()
+    upright.save(out, "JPEG", quality=90)
+    log.info(
+        "shrank a %.1f MB %dx%d photo to %.1f MB %dx%d for the photo check",
+        len(image_bytes) / 1_048_576, *original,
+        out.tell() / 1_048_576, *upright.size,
+    )
+    return out.getvalue(), "image/jpeg"
+
+
 def is_available() -> bool:
     """True when both the key and the package are present on this host."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -136,6 +188,11 @@ async def check_score(
     try:
         import anthropic
 
+        # Decoding a phone photo is a few hundred ms of CPU on a Pi; off the
+        # event loop, so the gateway heartbeat doesn't wait on it.
+        image_bytes, media_type = await asyncio.to_thread(
+            fit_for_api, image_bytes, media_type
+        )
         client = anthropic.AsyncAnthropic()
         response = await client.messages.create(
             model=MODEL,

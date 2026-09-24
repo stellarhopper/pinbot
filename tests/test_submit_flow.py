@@ -219,13 +219,39 @@ async def test_a_decimal_score_is_refused_not_multiplied(tmp_path, monkeypatch):
     ("proof", "expected"),
     [
         (FakeAttachment(content_type="application/pdf", filename="scan.pdf"), "isn't an image"),
-        (FakeAttachment(data=b"x" * (11 * 1024 * 1024)), "under 10 MB"),
+        (FakeAttachment(data=b"x" * (26 * 1024 * 1024)), "under 25 MB"),
     ],
 )
 async def test_bad_photos_are_refused(tmp_path, monkeypatch, proof, expected):
     h = await Harness.create(tmp_path, monkeypatch)
     itx = await h.submit("Godzilla", "1,000,000", proof=proof)
     assert expected in itx.reply
+    assert h.channel.sent == []
+    h.close()
+
+
+async def test_a_phone_sized_photo_is_accepted(tmp_path, monkeypatch):
+    """Phone cameras routinely produce photos over the old 10 MB cap."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    h.channel.guild = types.SimpleNamespace(filesize_limit=50 * 1024 * 1024)
+    proof = FakeAttachment(data=b"x" * (15 * 1024 * 1024))
+    itx = await h.submit("Godzilla", "1,000,000", proof=proof)
+    assert "Recorded" in itx.reply
+    assert len(h.channel.sent) == 1
+    h.close()
+
+
+async def test_a_photo_the_server_wont_let_me_repost_is_refused_up_front(
+    tmp_path, monkeypatch
+):
+    """A Nitro player can attach more than an unboosted server lets the bot
+    upload. Refusing it here beats failing the re-post and blaming permissions."""
+    h = await Harness.create(tmp_path, monkeypatch)
+    h.channel.guild = types.SimpleNamespace(filesize_limit=10 * 1024 * 1024)
+    proof = FakeAttachment(data=b"x" * (15 * 1024 * 1024))
+    itx = await h.submit("Godzilla", "1,000,000", proof=proof)
+    assert "under 10 MB" in itx.reply
+    assert "as big as this server lets me post" in itx.reply
     assert h.channel.sent == []
     h.close()
 

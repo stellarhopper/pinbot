@@ -40,7 +40,7 @@ class ScoresCog(commands.Cog):
         self.avatars = AvatarCache()
         # The photo check runs after the player has already been told their
         # score is in, so it gets its own budget: one at a time, because a Pi
-        # should not be holding a second 10 MB photo while an upload is in
+        # should not be holding a second 25 MB photo while an upload is in
         # flight. asyncio keeps only weak references to tasks, so a task that
         # isn't held here can be garbage-collected mid-flight.
         self._vision_slots = asyncio.Semaphore(1)
@@ -162,7 +162,7 @@ class ScoresCog(commands.Cog):
             return
 
         try:
-            data, filename = await proofs.read_proof(proof)
+            data, filename = await proofs.read_proof(proof, proofs.upload_limit(channel))
         except proofs.ProofError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return

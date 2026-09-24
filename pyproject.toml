@@ -16,8 +16,10 @@ dependencies = ["discord.py>=2.4"]
 # The photo/score cross-check. Absent this, the feature is simply unavailable
 # and everything else works unchanged — but note that the Pi deployment installs
 # [dev,vision], because a host with a key and no package fails silently.
-vision = ["anthropic>=0.40"]
-dev = ["pytest>=8"]
+# Pillow shrinks phone photos the API would refuse as too large.
+vision = ["anthropic>=0.40", "pillow>=10"]
+# Pillow here too, so CI exercises the resize without installing anthropic.
+dev = ["pytest>=8", "pillow>=10"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

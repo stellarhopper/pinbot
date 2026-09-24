@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import importlib.machinery
+import io
 import json
 import sys
 import types
@@ -175,6 +176,65 @@ async def test_the_request_sends_the_image_and_asks_for_low_effort(anthropic_dou
     image = sent["messages"][0]["content"][0]
     assert image["source"]["media_type"] == "image/png"
     assert base64.standard_b64decode(image["source"]["data"]) == IMAGE
+
+
+# -------------------------------------------------------- oversized photos
+
+def jpeg(width: int, height: int, *, orientation: int | None = None) -> bytes:
+    from PIL import Image
+
+    out = io.BytesIO()
+    exif = Image.Exif()
+    if orientation is not None:
+        exif[0x0112] = orientation
+    Image.new("RGB", (width, height), "white").save(out, "JPEG", exif=exif)
+    return out.getvalue()
+
+
+def dimensions(data: bytes) -> tuple[int, int]:
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data)) as image:
+        return image.size
+
+
+def test_a_photo_the_api_would_take_is_sent_byte_for_byte():
+    """A re-encode is lossy, and a second JPEG pass smears segment displays."""
+    photo = jpeg(4032, 3024)
+    assert vision.fit_for_api(photo, "image/jpeg") == (photo, "image/jpeg")
+
+
+def test_a_photo_too_heavy_for_the_api_is_shrunk(monkeypatch):
+    # A genuinely 10 MB photo is slow to build; lower the ceiling instead.
+    photo = jpeg(4032, 3024)
+    monkeypatch.setattr(vision, "_MAX_ENCODED_BYTES", len(photo))
+    data, media_type = vision.fit_for_api(photo, "image/png")
+    assert media_type == "image/jpeg"
+    assert max(dimensions(data)) == vision._TARGET_SIDE
+
+
+def test_a_photo_too_wide_for_the_api_is_shrunk():
+    """A 50 MP phone sensor is 8160 px wide; the API refuses anything over 8000."""
+    data, _ = vision.fit_for_api(jpeg(8160, 6120), "image/jpeg")
+    assert dimensions(data) == (2576, 1932)
+
+
+def test_a_shrunk_photo_keeps_the_phone_s_rotation():
+    """Phones say "rotate me" in EXIF, and the re-encode drops EXIF."""
+    data, _ = vision.fit_for_api(jpeg(8160, 6120, orientation=6), "image/jpeg")
+    assert dimensions(data) == (1932, 2576)
+
+
+def test_bytes_pillow_cannot_read_go_through_for_the_api_to_judge():
+    assert vision.fit_for_api(IMAGE, "image/jpeg") == (IMAGE, "image/jpeg")
+
+
+async def test_the_check_sends_the_shrunk_photo(anthropic_double):
+    anthropic_double(FakeResponse(payload(CLAIMED)))
+    await vision.check_score(jpeg(8160, 6120), "image/jpeg", CLAIMED)
+
+    image = FakeClient.last.messages.calls[0]["messages"][0]["content"][0]
+    assert max(dimensions(base64.standard_b64decode(image["source"]["data"]))) == 2576
 
 
 # ------------------------------------------------------------- wrong table
