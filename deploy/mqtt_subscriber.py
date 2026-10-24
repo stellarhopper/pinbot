@@ -17,6 +17,7 @@ import os
 import ssl
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -30,6 +31,11 @@ TOPIC = os.environ.get("MQTT_TOPIC", "pinbot/deploy")
 
 DEPLOY_SCRIPT = Path(__file__).resolve().parent / "deploy.sh"
 DEPLOY_TIMEOUT = 600  # generous: a cold venv build on a Pi is not quick
+
+# Set by on_message, consumed by deploy_worker. A trigger that lands while a
+# deployment is running just sets it again, and the worker runs once more:
+# deploy.sh always goes to the tip of main, so several triggers need one run.
+deploy_requested = threading.Event()
 
 
 def log(message: str) -> None:
@@ -50,7 +56,20 @@ def on_connect(client, userdata, flags, rc, *args) -> None:
 def on_message(client, userdata, msg) -> None:
     payload = msg.payload.decode(errors="replace").strip()
     log(f"trigger received: {payload or '(empty)'}")
-    run_deploy()
+    deploy_requested.set()
+
+
+def deploy_worker() -> None:
+    """Runs deployments off paho's network thread.
+
+    Deploying takes a minute or more. Run inside on_message, it stalled the
+    loop past the keepalive, the broker dropped the connection, and a trigger
+    sent meanwhile was lost.
+    """
+    while True:
+        deploy_requested.wait()
+        deploy_requested.clear()
+        run_deploy()
 
 
 def run_deploy() -> None:
@@ -58,7 +77,8 @@ def run_deploy() -> None:
         result = subprocess.run(
             ["bash", str(DEPLOY_SCRIPT)],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=DEPLOY_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
@@ -101,6 +121,11 @@ def build_client() -> mqtt.Client:
 
 
 def main() -> None:
+    # The Pi's locale is plain en_US, i.e. latin-1, and a log line with an
+    # em dash raised UnicodeEncodeError and killed the listener.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     missing = [
         name
         for name, value in (
@@ -123,6 +148,7 @@ def main() -> None:
     client.on_connect = on_connect
     client.on_message = on_message
     client.on_disconnect = on_disconnect
+    threading.Thread(target=deploy_worker, daemon=True).start()
 
     log(f"connecting to {BROKER}:{PORT}...")
     try:
