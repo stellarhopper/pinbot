@@ -4,7 +4,7 @@ The top 3 for every table on a TV at the venue, updating live while the bot runs
 at home.
 
 ```
-bot (Pi, home) ──TLS──▶ HiveMQ ◀──TLS── server.py (venue) ──LAN──▶ TV browser
+bot (Pi, home) ──TLS──▶ EMQX ◀──TLS── server.py (venue) ──LAN──▶ TV browser
 ```
 
 **Nothing at the venue is reachable from the internet.** `server.py` makes one
@@ -21,13 +21,14 @@ opens is the web page, on the venue LAN.
 
 ## 1. A login for the display
 
-Use the same HiveMQ cluster as the GitHub deploys, with **a new login of its
+Use the same EMQX deployment as the GitHub deploys, with **a new login of its
 own**:
 
-1. In HiveMQ Cloud, open the cluster, then **Access Management**, and add a
-   credential.
-2. Give it the **Subscribe** permission only. If your plan supports topic
-   filters, also limit it to `pinbot/scoreboard/#`.
+1. In the EMQX Cloud console, open the deployment, then **Access Control →
+   Authentication**, and add a user.
+2. Under **Authorization**, allow that username **Subscribe** on
+   `pinbot/scoreboard/#` and nothing else. The deployment's deny-all rule
+   refuses everything else (see [`deploy/README.md`](../deploy/README.md#the-broker)).
 
 Don't reuse the Pi's login. That one can publish, and a laptop left at the venue
 shouldn't be able to trigger a deploy or overwrite the board.
@@ -77,7 +78,7 @@ chromium --kiosk --noerrdialogs --disable-session-crashed-bubble http://localhos
 ## When it doesn't work
 
 **`connection refused` in the listener's output.** The username or password is
-wrong, or the credential lacks the Subscribe permission.
+wrong, or the user has no Subscribe rule for `pinbot/scoreboard/#`.
 
 **Stuck on "connecting to …".** The venue network is probably blocking outbound
 port 8883. Check from that machine:

@@ -78,7 +78,7 @@ else
 fi
 
 if [ ! -f "$DEPLOY_DIR/deploy/.env.mqtt" ]; then
-    echo "  MQTT broker details (from your HiveMQ / Mosquitto instance):"
+    echo "  MQTT broker details (the Pi's login on the EMQX deployment):"
     read -rp  "    broker host: " mqtt_broker
     read -rp  "    username:    " mqtt_user
     read -rsp "    password:    " mqtt_pass

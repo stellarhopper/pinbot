@@ -35,12 +35,30 @@ Settings → Secrets and variables → Actions → **New repository secret**, th
 
 | Secret | Value |
 | --- | --- |
-| `MQTT_BROKER` | e.g. `abc123.s1.eu.hivemq.cloud` |
-| `MQTT_USERNAME` | the broker user |
+| `MQTT_BROKER` | e.g. `abc123.ala.us-east-1.emqxsl.com` |
+| `MQTT_USERNAME` | the GitHub deploy user |
 | `MQTT_PASSWORD` | its password |
 
-A free HiveMQ Cloud instance is enough — the entire traffic is one short message
-per push.
+### The broker
+
+An EMQX Cloud Serverless deployment, on the free quota (spend limit 0). It's
+shared with the other bots that deploy this way, folklore among them: each bot
+keeps to its own `<bot>/…` topics, and each machine gets its own login, limited
+by an ACL to what it needs.
+
+| Login | Used by | Allowed |
+| --- | --- | --- |
+| `github-deploy` | GitHub Actions, in every bot's repo | publish `+/deploy` |
+| `rpi5-pinbot` | the deployer and the bot (`deploy/.env.mqtt`) | subscribe `pinbot/deploy`, publish `pinbot/scoreboard/#` |
+| `venue-display` | `display/server.py` at the venue | subscribe `pinbot/scoreboard/#` |
+
+Under **Access Control → Authorization**, a final **All Users** rule denies
+`#` for publish and subscribe, so anything not listed above is refused.
+
+Each always-connected client costs about 45,000 session minutes a month, so a
+handful of bots stays well inside the free 1 million. EMQX stops a deployment
+that has had no client connected for 30 days. The deployers are connected
+around the clock, so this one never goes idle.
 
 ## What a deployment does
 
